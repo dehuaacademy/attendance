@@ -20,7 +20,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.0';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.1';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -449,6 +449,8 @@ function admin_(b) {
       return { ok2: true };
     }
 
+    if (op === 'notifyTest') return notify_('🔧 德化打卡通知測試', '管理者送出的測試通知', 3);
+
     if (op === 'announce') {
       var title = String(b.title || '').trim(), body = String(b.body || '').trim();
       if (!title || title.length > 40) throw new Error('標題請填 1–40 字');
@@ -524,27 +526,33 @@ function log_(who, action, detail) {
 // audience：'admin'（預設，只推管理者）、'all'（管理者＋同仁）
 // App 推播（FCM）和 ntfy 並行；兩種都沒送到管理者時改寄 Email。通知失敗不影響打卡
 function notify_(title, message, priority, audience) {
-  var c = cfg_(), toAdmin = 0, ntfyOk = false;
+  var c = cfg_(), toAdmin = 0, ntfyOk = false, rep = { fcm: '', ntfy: '', mail: '' };
   try {
     var list = devices_(audience === 'all' ? null : '管理者');
     var r = fcm_(list, title, message, audience === 'all' ? 'all' : 'admin');
     toAdmin = r.sentAdmin;
-  } catch (e) { /* App 推播失敗，靠 ntfy／Email */ }
-  if (c.nNtfy && c.ntfy) {
+    rep.fcm = '裝置 ' + list.length + '、送達 ' + r.sent + (r.error ? '、' + r.error : '');
+  } catch (e) { rep.fcm = '錯誤：' + e.message; }
+  if (!c.nNtfy) rep.ntfy = '設定為關閉';
+  else if (!c.ntfy) rep.ntfy = '設定分頁沒有 ntfy頻道';
+  else {
     try {
       var n = UrlFetchApp.fetch('https://ntfy.sh/', {
         method: 'post', contentType: 'application/json', muteHttpExceptions: true,
         payload: JSON.stringify({ topic: c.ntfy, title: title, message: message, priority: priority || 3 })
       });
       ntfyOk = n.getResponseCode() < 300;
-    } catch (e) {}
+      rep.ntfy = 'HTTP ' + n.getResponseCode() + (ntfyOk ? '' : '：' + n.getContentText().slice(0, 150));
+    } catch (e) { rep.ntfy = '錯誤：' + e.message; }
   }
   if (!toAdmin && !ntfyOk) {
     try {
       MailApp.sendEmail(Session.getEffectiveUser().getEmail(), '[德化打卡] ' + title,
                         message + '\n\n（App 推播與 ntfy 都沒有送達，改用 Email 通知）');
-    } catch (e) {}
+      rep.mail = '已寄出';
+    } catch (e) { rep.mail = '錯誤：' + e.message; }
   }
+  return rep;
 }
 
 // 推播裝置：[{row, token, name, role}]，只取狀態「有效」；role 為 null 時全部
