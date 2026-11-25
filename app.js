@@ -13,13 +13,19 @@ var CODE = store('dh_pin');
 var ROLE = 'staff';   // staff／leader／admin
 var NAME = '';
 var photos = []; // 已壓縮的 dataURL
-var busy = false;
+var busy = false, busySince = 0;
+// 上一個動作卡住（例如定位一直沒回應）超過 25 秒就自動解除，並提示使用者，不再靜靜擋掉按鈕
+function isBusy() {
+  if (busy && Date.now() - busySince > 25000) busy = false;
+  if (busy) toast('上一個動作還在處理中，請稍等幾秒');
+  return busy;
+}
 
 function $(id) { return document.getElementById(id); }
 function pad(n) { return (n < 10 ? '0' : '') + n; }
 function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 function msg(id, text, cls) { var m = $(id); m.textContent = text; m.className = 'msg ' + (cls || ''); }
-function lock(on) { busy = on; ['btnIn', 'btnOut', 'btnSend', 'btnStay'].forEach(function (b) { $(b).disabled = on; }); }
+function lock(on) { busy = on; busySince = Date.now(); ['btnIn', 'btnOut', 'btnSend', 'btnStay'].forEach(function (b) { $(b).disabled = on; }); }
 function invalid(text) { $('app').classList.add('hide'); $('invalidText').textContent = text; $('invalid').classList.remove('hide'); }
 function show(id) { ['app', 'login', 'invalid', 'admin'].forEach(function (x) { $(x).classList.toggle('hide', x !== id); }); }
 
@@ -35,6 +41,7 @@ function login() {
 }
 function logout(text) {
   pushLogout();
+  lock(false); msg('mClock', '');
   store('dh_pin', null); CODE = null; NAME = '';
   $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
   AD = null; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
@@ -118,8 +125,8 @@ function renderSchedule(list, today, days) {
 }
 
 function shiftOp(date, op, btn) {
-  if (busy) return;
-  busy = true; btn.disabled = true; btn.textContent = '…';
+  if (isBusy()) return;
+  busy = true; busySince = Date.now(); btn.disabled = true; btn.textContent = '…';
   apiPost({ action: 'shift', u: CODE, op: op, date: date })
     .then(function () { busy = false; return load(); })
     .catch(function (e) { busy = false; btn.disabled = false; btn.textContent = op === 'add' ? '我要排' : '取消'; alertMsg(e.message); });
@@ -128,7 +135,10 @@ function alertMsg(t) { var m = $('mSched'); m.textContent = t; m.className = 'ms
 function esc(s) { return String(s || '').replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
 
 // ===== 打卡 =====
-function getLoc(cb) {
+function getLoc(cb0) {
+  // 有些手機在定位授權視窗沒關掉時，兩個回呼都不會發生；20 秒後一律放行（後台標「未取得定位」）
+  var done = false, cb = function (a, b) { if (!done) { done = true; cb0(a, b); } };
+  setTimeout(function () { cb(null, 'fail'); }, 20000);
   if (!navigator.geolocation) { cb(null, 'fail'); return; }
   navigator.geolocation.getCurrentPosition(
     function (p) { cb({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }); },
@@ -139,19 +149,21 @@ function getLoc(cb) {
 
 var warned = false;
 function clock(type) {
-  if (busy) return;
+  if (isBusy()) return;
   if (type === '簽退' && $('sIn').textContent === '—' && !warned) {
     warned = true; msg('mClock', '今天還沒簽到，確定要簽退請再按一次', 'err'); return;
   }
   lock(true); msg('mClock', '處理中…');
+  var who = CODE;   // 記下按鈕當下是誰，避免定位還沒回來就切換使用者
   getLoc(function (loc, err) {
+    if (CODE !== who) return;
     if (err === 'denied') {
       lock(false);
       msg('mClock', '請允許「位置」權限後再打卡（手機設定 → 瀏覽器 → 位置）', 'err');
       return;
     }
     // 取不到定位（逾時）仍送出，後台標示「未取得定位」
-    apiPost({ action: 'clock', u: CODE, type: type,
+    apiPost({ action: 'clock', u: who, type: type,
               lat: loc ? loc.lat : null, lng: loc ? loc.lng : null, acc: loc ? loc.acc : null })
       .then(function (r) {
         warned = false; lock(false); msg('mClock', r.type + '成功 ' + r.time, 'ok');
@@ -227,7 +239,7 @@ function stayValues(all) {
   return out;
 }
 function sendStay() {
-  if (busy) return;
+  if (isBusy()) return;
   var rows = stayValues(false);
   var bad = rows.filter(function (r) { return !r.name || !r.area; });
   if (!rows.length) { msg('mStay', '請至少填一位', 'err'); return; }
@@ -240,7 +252,7 @@ function sendStay() {
 
 // ===== 事務回報 =====
 function send() {
-  if (busy) return;
+  if (isBusy()) return;
   var text = $('rText').value.trim();
   if (!text && !photos.length) { msg('mReport', '請填寫內容或附上照片', 'err'); return; }
   lock(true); msg('mReport', photos.length ? '上傳中，照片較多時需要幾秒…' : '送出中…');

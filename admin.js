@@ -18,6 +18,7 @@ function leadGo(t, noRender) {
 // 管理者與前賢共用這個畫面；前賢只看得到排班、回報、公告，而且都不能修改
 var VIEW_TABS = ['sched', 'log', 'news'];
 function adminStart(r) {
+  busy = false;
   ROLE = r.role === 'viewer' ? 'viewer' : 'admin';
   HOST = { body: 'adBody', msg: 'adMsg' }; adTab = ROLE === 'viewer' ? 'log' : 'people';
   $('adWho').innerHTML = esc(r.name) + (ROLE === 'viewer' ? '<span class="role">唯讀</span>' : '');
@@ -48,8 +49,8 @@ function adTabGo(t) {
   adRender();
 }
 function adDo(op, extra, okText) {
-  if (busy) return;
-  busy = true; adMsg('處理中…');
+  if (isBusy()) return;
+  busy = true; busySince = Date.now(); adMsg('處理中…');
   return adm(op, extra).then(function (r) {
     busy = false; adMsg(typeof okText === 'function' ? okText(r) : okText);
     return adminLoad().then(function () { return r; });
@@ -113,8 +114,8 @@ function adRole(name, role) {
 }
 function adToggle(name, en) { adDo('setEnabled', { name: name, enabled: en }, name + (en ? ' 已啟用' : ' 已停用')); }
 function adDevice(name) {
-  if (busy) return;
-  busy = true; adMsg('設定中…');
+  if (isBusy()) return;
+  busy = true; busySince = Date.now(); adMsg('設定中…');
   adm('device', { name: name }).then(function (r) {
     busy = false;
     store('dh_pin', r.pin); CODE = r.pin; AD = null;
