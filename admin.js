@@ -3,33 +3,35 @@ var AD = null;          // overview 資料
 var adTab = 'people';
 var HOST = { body: 'adBody', msg: 'adMsg' };   // 管理者畫面；組長用「管理」分頁
 
-// 組長：在員工畫面的「管理」分頁，只有今日、排班、紀錄（含補登）
+// 組長：在組員畫面的「管理」分頁：今日、排班、紀錄（含補登）、零用金
 function leadStart() {
   HOST = { body: 'leadBody', msg: 'leadMsg' };
-  leadGo(adTab === 'sched' || adTab === 'log' ? adTab : 'today', true);
+  leadGo(['sched', 'log', 'cash'].indexOf(adTab) >= 0 ? adTab : 'today', true);
   adminLoad();
 }
 function leadGo(t, noRender) {
   adTab = t;
-  ['today', 'sched', 'log'].forEach(function (x) { $('lg-' + x).classList.toggle('on', x === t); });
-  if (!noRender) adRender();
+  ['today', 'sched', 'log', 'cash'].forEach(function (x) { $('lg-' + x).classList.toggle('on', x === t); });
+  if (!noRender || t === 'cash') adRender();
+  if (t === 'cash') cashLoad();
 }
 
-// 管理者與前賢共用這個畫面；前賢只看得到排班、回報、公告，而且都不能修改
-var VIEW_TABS = ['sched', 'log', 'news'];
+// 管理者與唯讀角色（前賢、執行長、財務）共用這個畫面；唯讀角色只看得到排班、回報、公告、零用金，出勤資料都不能修改
+var VIEW_TABS = ['sched', 'log', 'news', 'cash'], AD_TABS = ['people', 'today', 'sched', 'log', 'news', 'cash', 'settings'];
 function adminStart(r) {
   busy = false;
   ROLE = r.role === 'viewer' ? 'viewer' : 'admin';
-  HOST = { body: 'adBody', msg: 'adMsg' }; adTab = ROLE === 'viewer' ? 'log' : 'people';
-  $('adWho').innerHTML = esc(r.name) + (ROLE === 'viewer' ? '<span class="role">唯讀</span>' : '');
+  HOST = { body: 'adBody', msg: 'adMsg' }; adTab = ROLE !== 'viewer' ? 'people' : (r.title === '執行長' || r.title === '財務') ? 'cash' : 'log';
+  $('adWho').innerHTML = esc(r.name) + (ROLE === 'viewer' ? '<span class="role">' + esc(r.title || '唯讀') + '</span>' : '');
   $('at-log').textContent = ROLE === 'viewer' ? '回報' : '紀錄';
-  ['people', 'today', 'sched', 'log', 'news', 'settings'].forEach(function (x) {
+  AD_TABS.forEach(function (x) {
     $('at-' + x).classList.toggle('hide', ROLE === 'viewer' && VIEW_TABS.indexOf(x) < 0);
     $('at-' + x).classList.toggle('on', x === adTab);
   });
   show('admin');
   $('adToday').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
   adminLoad();
+  if (adTab === 'cash') cashLoad();
   syncPush();
 }
 var adLast = '';
@@ -97,8 +99,9 @@ function adMsg(t, err) {
   var m = $(HOST.msg); m.textContent = t || ''; m.className = 'msg ' + (err ? 'err' : 'ok'); if (t) setTimeout(function () { if (m.textContent === t) m.textContent = ''; }, 5000); }
 function adTabGo(t) {
   adTab = t;
-  ['people', 'today', 'sched', 'log', 'news', 'settings'].forEach(function (x) { $('at-' + x).classList.toggle('on', x === t); });
+  AD_TABS.forEach(function (x) { $('at-' + x).classList.toggle('on', x === t); });
   adRender();
+  if (t === 'cash') cashLoad();
 }
 function adDo(op, extra, okText) {
   if (isBusy()) return;
@@ -109,12 +112,13 @@ function adDo(op, extra, okText) {
   }).catch(function (e) { busy = false; adMsg(e.message, true); });
 }
 function staffOpts(sel) {
-  return (AD.users || []).filter(function (u) { return (u.role === '員工' || u.role === '組長') && u.enabled; })
+  return (AD.users || []).filter(function (u) { return (u.role === '組員' || u.role === '組長') && u.enabled; })
     .map(function (u) { return '<option' + (u.name === sel ? ' selected' : '') + '>' + esc(u.name) + '</option>'; }).join('');
 }
 function dlabel(ds) { var d = new Date(ds + 'T00:00:00'); return (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）'; }
 
 function adRender() {
+  if (adTab === 'cash') { CASH_HOST = HOST.body; cashRender(); return; }
   if (!AD) return;
   var h = '';
   if (adTab === 'people') h = adPeople();
@@ -134,27 +138,27 @@ function adPeople() {
     if (u.role === '管理者') return;
     var n = esc(u.name), q = "'" + n.replace(/'/g, '') + "'";
     var bell = (AD.devices || {})[u.name] ? ' <small class="ok">🔔 通知已開</small>' : '';
-    var tag = u.role === '員工' ? '' : '<span class="role">' + esc(u.role) + '</span>';
+    var tag = u.role === '組員' ? '' : '<span class="role">' + esc(u.role) + '</span>';
     h += '<div class="prow' + (u.enabled ? '' : ' off') + '"><div class="pn"><b>' + n + tag + bell + '</b><span>PIN ' + esc(u.pin) + (u.enabled ? '' : '・已停用') + '</span></div>'
        + '<div class="pb">'
        + (u.enabled ? '<button class="sb pri" onclick="adDevice(' + q + ')">設定這支手機</button>' : '')
        + '<button class="sb" onclick="adNewPin(' + q + ',this)">換 PIN</button>'
        + '<button class="sb" onclick="adToggle(' + q + ',' + !u.enabled + ')">' + (u.enabled ? '停用' : '啟用') + '</button>'
-       + (u.enabled ? '<select class="rsel" onchange="adRole(' + q + ',this.value)">' + ['員工', '組長', '前賢'].map(function (r) {
+       + (u.enabled ? '<select class="rsel" onchange="adRole(' + q + ',this.value)">' + ['組員', '組長', '前賢', '執行長', '財務'].map(function (r) {
              return '<option' + (r === u.role ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select>' : '')
        + '</div></div>';
   });
   h += '</div><div class="card"><h3 class="ah">新增人員</h3>'
      + '<input id="nuName" placeholder="姓名" maxlength="20">'
      + '<input id="nuPin" placeholder="PIN（4 位數，空白自動產生）" inputmode="numeric" maxlength="4">'
-     + '<select id="nuRole"><option value="員工">員工（同仁）</option><option value="前賢">前賢（唯讀，可多人共用）</option></select>'
+     + '<select id="nuRole"><option value="組員">組員</option><option value="前賢">前賢（唯讀，可多人共用）</option><option value="執行長">執行長（核准大額零用金）</option><option value="財務">財務（撥款、核對零用金）</option></select>'
      + '<button class="big send" onclick="adAddUser()">新增</button></div>';
   return h;
 }
 function adAddUser() {
   var name = $('nuName').value.trim(), pin = $('nuPin').value.trim();
   if (!name) { adMsg('請輸入姓名', true); return; }
-  adDo('addUser', { name: name, pin: pin, role: $('nuRole').value }, function (r) { return '已新增 ' + r.name + (r.role === '前賢' ? '（前賢）' : '') + '，PIN：' + r.pin; });
+  adDo('addUser', { name: name, pin: pin, role: $('nuRole').value }, function (r) { return '已新增 ' + r.name + (r.role !== '組員' ? '（' + r.role + '）' : '') + '，PIN：' + r.pin; });
 }
 var pinArm = '';
 function adNewPin(name, btn) {
@@ -163,7 +167,7 @@ function adNewPin(name, btn) {
   adDo('setPin', { name: name }, function (r) { return r.name + ' 的新 PIN：' + r.pin + '（舊的已失效）'; });
 }
 function adRole(name, role) {
-  adDo('setRole', { name: name, role: role }, name + ' 已改為' + role + (role === '組長' ? '（下次打開 App 會多一個「管理」分頁）' : role === '前賢' ? '（只能看回報、排班、公告）' : ''));
+  adDo('setRole', { name: name, role: role }, name + ' 已改為' + role + (role === '組長' ? '（下次打開 App 會多一個「管理」分頁）' : role === '前賢' ? '（只能看回報、排班、公告、零用金）' : role === '執行長' ? '（唯讀出勤＋核准大額零用金）' : role === '財務' ? '（唯讀出勤＋撥款、核對零用金）' : ''));
 }
 function adToggle(name, en) { adDo('setEnabled', { name: name, enabled: en }, name + (en ? ' 已啟用' : ' 已停用')); }
 function adDevice(name) {
@@ -229,7 +233,7 @@ function adSchedOpen(ds) { schedOpen = schedOpen === ds ? '' : ds; adRender(); }
 function adShiftSave(ds, withTime) {
   var x = { name: $('sfName').value, date: ds, mode: 'add', note: $('sfNote').value.trim() };
   if (withTime) { x.start = $('sfStart').value; x.end = $('sfEnd').value; }
-  if (!x.name) { adMsg('請選擇員工', true); return; }
+  if (!x.name) { adMsg('請選擇組員', true); return; }
   schedOpen = '';
   adDo('shift', x, '已排入 ' + x.name + ' ' + dlabel(ds));
 }
@@ -270,7 +274,7 @@ function adClockFix() {
 
 // ---- 公告 ----
 function adNews() {
-  var staff = (AD.users || []).filter(function (u) { return (u.role === '員工' || u.role === '組長') && u.enabled; });
+  var staff = (AD.users || []).filter(function (u) { return (u.role === '組員' || u.role === '組長') && u.enabled; });
   var on = staff.filter(function (u) { return (AD.devices || {})[u.name]; }).map(function (u) { return esc(u.name); });
   var off = staff.filter(function (u) { return !(AD.devices || {})[u.name]; }).map(function (u) { return esc(u.name); });
   var h = pushCard('adPush');
@@ -306,7 +310,7 @@ function adSettings() {
     else h += '<input id="st' + i + '" data-k="' + esc(k) + '" value="' + esc(v) + '"' + (/公尺|天數/.test(k) ? ' inputmode="numeric"' : '') + '>';
     if (s[k].note) h += '<small class="note">' + esc(s[k].note) + '</small>';
   });
-  return h + '<button class="big send" onclick="adSaveSettings()">儲存設定</button><small>儲存後立即生效，員工下次打開 App 就會看到新的區域選項</small></div>'
+  return h + '<button class="big send" onclick="adSaveSettings()">儲存設定</button><small>儲存後立即生效，組員下次打開 App 就會看到新的區域選項</small></div>'
     + '<div class="card"><h3 class="ah">更換管理者 PIN</h3>'
     + '<input id="apPin" type="password" inputmode="numeric" maxlength="6" placeholder="新的 6 位數 PIN" autocomplete="off">'
     + '<input id="apPin2" type="password" inputmode="numeric" maxlength="6" placeholder="再輸入一次" autocomplete="off">'

@@ -44,7 +44,7 @@ function logout(text) {
   lock(false); msg('mClock', '');
   store('dh_pin', null); CODE = null; NAME = '';
   $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
-  AD = null; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
+  AD = null; CASH = null; cashArm = ''; cashPh = []; crPh = []; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
   $('pin').focus();
 }
 
@@ -99,6 +99,8 @@ function applyStatus(r) {
     NAME = r.name;
     ROLE = r.leader ? 'leader' : 'staff';
     $('tab-lead').classList.toggle('hide', !r.leader);
+    $('seg-cash').classList.toggle('hide', !!r.leader);          // 組員在「回報」登記代墊；組長在「管理 → 零用金」
+    if (r.leader && $('rCash').style.display !== 'none') seg('work');
     if (!r.leader && !$('lead').classList.contains('hide')) tab('clock');
     $('who').innerHTML = esc(r.name) + (r.leader ? '<span class="role">組長</span>' : '');
     $('today').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
@@ -234,10 +236,11 @@ document.addEventListener('change', function (e) {
 
 // ===== 回報：事務回報／住廟回報切換 =====
 function seg(t) {
-  $('rWork').style.display = t === 'work' ? '' : 'none';
-  $('rStay').style.display = t === 'stay' ? '' : 'none';
-  $('seg-work').classList.toggle('on', t === 'work');
-  $('seg-stay').classList.toggle('on', t === 'stay');
+  ['work', 'stay', 'cash'].forEach(function (x) {
+    $('r' + x.charAt(0).toUpperCase() + x.slice(1)).style.display = t === x ? '' : 'none';
+    $('seg-' + x).classList.toggle('on', t === x);
+  });
+  if (t === 'cash') cashOpen('rCashBody');
 }
 
 // 住廟回報：10 列，左邊選區域、右邊填姓名；空白列不送出。日期＝送出當天
@@ -296,6 +299,7 @@ function canAutoRender() {
   if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;      // 正在輸入
   if (typeof schedOpen !== 'undefined' && schedOpen) return false;          // 排班表單開著
   if (ROLE === 'admin' && adTab === 'settings') return false;
+  if (typeof cashTyping === 'function' && cashTyping()) return false;
   return !['nuName', 'nuPin', 'nwTitle', 'nwBody', 'apPin'].some(function (id) { return $(id) && $(id).value; });
 }
 function refresh(force) {
@@ -303,9 +307,11 @@ function refresh(force) {
   if (!force && (Date.now() - lastRefresh < 15000 || busy)) return;
   lastRefresh = Date.now();
   if (force) toast('更新中…');
-  if (ROLE === 'admin' || ROLE === 'viewer') { if (force || canAutoRender()) adminLoad(); return; }
+  var cashOn = typeof cashVisible === 'function' && cashVisible() && (force || canAutoRender());
+  if (ROLE === 'admin' || ROLE === 'viewer') { if (force || canAutoRender()) adminLoad(); if (cashOn) cashLoad(); return; }
   load();
   if (AD && !$('lead').classList.contains('hide') && (force || canAutoRender())) adminLoad();
+  if (cashOn) cashLoad();
 }
 document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
 setInterval(function () { refresh(); }, 60000);
