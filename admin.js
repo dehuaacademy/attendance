@@ -6,6 +6,7 @@ function adminStart(r) {
   show('admin');
   $('adToday').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
   adminLoad();
+  syncPush();
 }
 function adminLoad() {
   return adm('overview').then(function (d) { AD = d; adRender(); }).catch(function (e) { adMsg(e.message, true); });
@@ -18,7 +19,7 @@ function adm(op, extra) {
 function adMsg(t, err) { var m = $('adMsg'); m.textContent = t || ''; m.className = 'msg ' + (err ? 'err' : 'ok'); if (t) setTimeout(function () { if (m.textContent === t) m.textContent = ''; }, 5000); }
 function adTabGo(t) {
   adTab = t;
-  ['people', 'today', 'sched', 'log', 'settings'].forEach(function (x) { $('at-' + x).classList.toggle('on', x === t); });
+  ['people', 'today', 'sched', 'log', 'news', 'settings'].forEach(function (x) { $('at-' + x).classList.toggle('on', x === t); });
   adRender();
 }
 function adDo(op, extra, okText) {
@@ -42,6 +43,7 @@ function adRender() {
   if (adTab === 'today') h = adToday();
   if (adTab === 'sched') h = adSched();
   if (adTab === 'log') h = adLog();
+  if (adTab === 'news') h = adNews();
   if (adTab === 'settings') h = adSettings();
   $('adBody').innerHTML = h;
 }
@@ -52,7 +54,8 @@ function adPeople() {
   AD.users.forEach(function (u) {
     if (u.role === '管理者') return;
     var n = esc(u.name), q = "'" + n.replace(/'/g, '') + "'";
-    h += '<div class="prow' + (u.enabled ? '' : ' off') + '"><div class="pn"><b>' + n + '</b><span>PIN ' + esc(u.pin) + (u.enabled ? '' : '・已停用') + '</span></div>'
+    var bell = (AD.devices || {})[u.name] ? ' <small class="ok">🔔 通知已開</small>' : '';
+    h += '<div class="prow' + (u.enabled ? '' : ' off') + '"><div class="pn"><b>' + n + bell + '</b><span>PIN ' + esc(u.pin) + (u.enabled ? '' : '・已停用') + '</span></div>'
        + '<div class="pb">'
        + (u.enabled ? '<button class="sb pri" onclick="adDevice(' + q + ')">設定這支手機</button>' : '')
        + '<button class="sb" onclick="adNewPin(' + q + ',this)">換 PIN</button>'
@@ -175,6 +178,34 @@ function adClockFix() {
   var x = { name: $('cfName').value, date: $('cfDate').value, time: $('cfTime').value, type: $('cfType').value };
   if (!x.name || !x.date || !x.time) { adMsg('請填完整', true); return; }
   adDo('clockFix', x, '已補登 ' + x.name + ' ' + x.date + ' ' + x.time + ' ' + x.type);
+}
+
+// ---- 公告 ----
+function adNews() {
+  var staff = (AD.users || []).filter(function (u) { return u.role === '員工' && u.enabled; });
+  var on = staff.filter(function (u) { return (AD.devices || {})[u.name]; }).map(function (u) { return esc(u.name); });
+  var off = staff.filter(function (u) { return !(AD.devices || {})[u.name]; }).map(function (u) { return esc(u.name); });
+  var h = pushCard('adPush')
+    + '<div class="card"><h3 class="ah">發公告給同仁</h3>'
+    + '<input id="nwTitle" placeholder="標題（必填，40 字內）" maxlength="40">'
+    + '<textarea id="nwBody" placeholder="內容（可空白）" maxlength="1000" style="min-height:110px"></textarea>'
+    + '<button class="big send" id="btnNews" onclick="adAnnounce(this)">發送</button>'
+    + '<small>已開通知：' + (on.join('、') || '還沒有人') + (off.length ? '<br>還沒開通知：' + off.join('、') + '（他們仍可在 App「公告」看到）' : '') + '</small></div>'
+    + '<div class="card"><h3 class="ah">最近的公告</h3>' + (AD.news.length ? '' : '<div class="empty">還沒有公告</div>');
+  AD.news.forEach(function (n) {
+    h += '<div class="rep"><div><b>' + esc(n.title) + '</b><small>' + esc(n.time) + '・' + esc(n.by) + '</small></div>' + (n.body ? '<p>' + esc(n.body) + '</p>' : '') + '</div>';
+  });
+  return h + '</div>';
+}
+var newsArm = false;
+function adAnnounce(btn) {
+  var title = $('nwTitle').value.trim(), body = $('nwBody').value.trim();
+  if (!title) { adMsg('請填標題', true); return; }
+  if (!newsArm) { newsArm = true; btn.textContent = '確定發送給所有同仁？'; btn.classList.add('in'); return; }
+  newsArm = false;
+  adDo('announce', { title: title, body: body }, function (r) {
+    return '公告已發出，送達 ' + r.sent + ' 支手機' + (r.error ? '（推播異常：' + r.error + '）' : '');
+  });
 }
 
 // ---- 設定 ----

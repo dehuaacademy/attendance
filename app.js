@@ -33,6 +33,7 @@ function login() {
   });
 }
 function logout(text) {
+  pushLogout();
   store('dh_pin', null); CODE = null; NAME = '';
   $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
   AD = null; show('login'); msg('mLogin', text || '', text ? 'err' : '');
@@ -40,11 +41,12 @@ function logout(text) {
 }
 
 function tab(t) {
-  ['clock', 'report', 'schedule'].forEach(function (x) {
+  ['clock', 'report', 'schedule', 'news'].forEach(function (x) {
     $(x).classList.toggle('hide', x !== t);
     $('tab-' + x).classList.toggle('on', x === t);
   });
   if (t === 'schedule') load();
+  if (t === 'news') newsSeen();
 }
 
 // ===== 與後台溝通 =====
@@ -73,6 +75,10 @@ function load() {
     $('sIn').textContent = r.clock['簽到'] || '—';
     $('sOut').textContent = r.clock['簽退'] || '—';
     renderSchedule(r.schedule, r.today, r.days || 60);
+    renderNews(r.news);
+    if (!$('news').classList.contains('hide')) newsSeen();
+    renderPushCards();
+    syncPush();
     return true;
   }).catch(function (e) {
     if (/PIN/.test(e.message)) logout('PIN 錯誤或已停用，請重新輸入');

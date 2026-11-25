@@ -113,6 +113,11 @@
   .login input{font-size:28px;letter-spacing:12px;text-align:center}
   .login input::placeholder{letter-spacing:2px;font-size:18px}
   .login small{display:block;text-align:center;font-size:13px;opacity:.6;margin-top:12px}
+  .push p{font-size:15px;margin-bottom:12px;line-height:1.6}
+  .dot{display:inline-block;min-width:18px;height:18px;line-height:18px;border-radius:9px;background:#c62828;color:#fff;font-size:11px;font-style:normal;margin-left:4px;vertical-align:2px}
+  .rep.new b::before{content:'● ';color:#c62828}
+  #toast{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));background:var(--navy);color:#fff;border-radius:12px;padding:14px 16px;font-size:15px;white-space:pre-wrap;box-shadow:0 6px 20px rgba(0,0,0,.25);transform:translateY(-150%);transition:transform .3s;z-index:9;border-left:5px solid var(--gold)}
+  #toast.on{transform:none}
   .switch{float:right;margin-top:4px;background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:14px;padding:3px 10px;font:inherit;font-size:12px;font-weight:400}
 </style>
 </head>
@@ -140,9 +145,11 @@
     <button id="tab-clock" class="on" onclick="tab('clock')">簽到/簽退</button>
     <button id="tab-report" onclick="tab('report')">回報</button>
     <button id="tab-schedule" onclick="tab('schedule')">班表</button>
+    <button id="tab-news" onclick="tab('news')">公告</button>
   </nav>
   <main>
     <section id="clock">
+      <div id="pushStaff"></div>
       <div class="card status">
         <div><small>簽到</small><b id="sIn">—</b></div>
         <div><small>簽退</small><b id="sOut">—</b></div>
@@ -175,6 +182,10 @@
       </div>
     </section>
 
+    <section id="news" class="hide">
+      <div class="card" id="newsList"><div class="empty">載入中…</div></div>
+    </section>
+
     <section id="schedule" class="hide">
       <div class="msg" id="mSched"></div>
       <div class="card sched" id="schedList"><div class="empty">載入中…</div></div>
@@ -192,14 +203,17 @@
     <button id="at-today" onclick="adTabGo('today')">今日</button>
     <button id="at-sched" onclick="adTabGo('sched')">排班</button>
     <button id="at-log" onclick="adTabGo('log')">紀錄</button>
+    <button id="at-news" onclick="adTabGo('news')">公告</button>
     <button id="at-settings" onclick="adTabGo('settings')">設定</button>
   </nav>
   <main><div class="msg" id="adMsg"></div><div id="adBody"><div class="empty">載入中…</div></div></main>
 </div>
 
+<div id="toast"></div>
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=7"></script>
-<script src="admin.js?v=1"></script>
+<script src="app.js?v=8"></script>
+<script src="admin.js?v=2"></script>
+<script src="push.js?v=1"></script>
 </body>
 </html>
