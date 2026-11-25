@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1C264D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="德化打卡">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<title>德化 廟務打卡</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{--navy:#1C264D;--gold:#F7CC71;--gray:#E6E6E6;--white:#fff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Noto Sans TC",sans-serif;background:var(--gray);color:var(--navy);min-height:100vh;display:flex;flex-direction:column}
+  header{background:var(--navy);color:var(--white);padding:calc(20px + env(safe-area-inset-top)) 20px 16px}
+  header .who{font-size:22px;font-weight:700;min-height:32px}
+  header .date{font-size:14px;opacity:.8;margin-top:2px}
+  nav{display:flex;background:var(--navy)}
+  nav button{flex:1;padding:12px;border:0;background:none;color:#fff;opacity:.6;font:inherit;font-size:16px;border-bottom:3px solid transparent}
+  nav button.on{opacity:1;border-color:var(--gold);font-weight:700}
+  #app{flex:1}
+  main{padding:20px;max-width:480px;width:100%;margin:0 auto}
+  .card{background:var(--white);border-radius:12px;padding:20px;margin-bottom:16px}
+  .status{display:flex;gap:12px}
+  .status div{flex:1;text-align:center}
+  .status small{display:block;font-size:13px;opacity:.6}
+  .status b{font-size:24px}
+  .big{display:block;width:100%;padding:22px;border:0;border-radius:12px;font:inherit;font-size:22px;font-weight:700;margin-bottom:12px;cursor:pointer}
+  .in{background:var(--navy);color:var(--white)}
+  .out{background:var(--white);color:var(--navy);border:2px solid var(--navy)}
+  .big:disabled{opacity:.5}
+  label{display:block;font-size:14px;margin:0 0 6px;font-weight:700}
+  input,textarea,select{width:100%;font:inherit;font-size:16px;padding:12px;border:1px solid #c9c9c9;border-radius:8px;margin-bottom:16px;color:var(--navy);background:#fff}
+  textarea{min-height:160px;resize:vertical}
+  .send{background:var(--gold);color:var(--navy)}
+  .msg{min-height:24px;text-align:center;font-size:15px;margin-top:4px}
+  .msg.ok{color:#2e7d32}.msg.err{color:#c62828}
+  .hide{display:none!important}
+  .photos{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .ph{position:relative;width:88px;height:88px;border-radius:8px;overflow:hidden;background:var(--gray)}
+  .ph img{width:100%;height:100%;object-fit:cover}
+  .ph button{position:absolute;top:2px;right:2px;width:26px;height:26px;border-radius:13px;border:0;background:rgba(28,38,77,.85);color:#fff;font-size:16px;line-height:26px}
+  .add{width:88px;height:88px;border:2px dashed #b5b5b5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#777;text-align:center;cursor:pointer}
+  .day{margin-bottom:14px}
+  .day h3{font-size:15px;margin-bottom:6px}
+  .day h3 small{font-weight:400;opacity:.6;margin-left:6px}
+  .shift{display:flex;justify-content:space-between;padding:8px 10px;border-radius:8px;background:#f5f5f5;margin-bottom:6px;font-size:15px}
+  .shift.me{background:var(--gold);font-weight:700}
+  .shift .note{display:block;font-size:12px;font-weight:400;opacity:.75}
+  .empty{text-align:center;opacity:.6;padding:12px 0}
+  footer{text-align:center;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+  footer img{width:32px;height:auto}
+  .invalid{padding:60px 20px;text-align:center;font-size:18px;flex:1}
+  .invalid small{display:block;margin-top:8px;font-size:14px;opacity:.7}
+</style>
+</head>
+<body>
+
+<div id="invalid" class="invalid hide"><span id="invalidText">連結無效</span><small>請向管理者索取個人專屬連結</small></div>
+
+<div id="app" class="hide">
+  <header>
+    <div class="who" id="who">載入中…</div>
+    <div class="date" id="today"></div>
+  </header>
+  <nav>
+    <button id="tab-clock" class="on" onclick="tab('clock')">打卡</button>
+    <button id="tab-report" onclick="tab('report')">回報</button>
+    <button id="tab-schedule" onclick="tab('schedule')">班表</button>
+  </nav>
+  <main>
+    <section id="clock">
+      <div class="card status">
+        <div><small>簽到</small><b id="sIn">—</b></div>
+        <div><small>簽退</small><b id="sOut">—</b></div>
+      </div>
+      <button class="big in" id="btnIn" onclick="clock('簽到')">簽到</button>
+      <button class="big out" id="btnOut" onclick="clock('簽退')">簽退</button>
+      <div class="msg" id="mClock"></div>
+    </section>
+
+    <section id="report" class="hide">
+      <div class="card">
+        <label for="rKind">類型</label>
+        <select id="rKind"><option>日報</option><option>異常回報</option><option>其他</option></select>
+        <label for="rDate">日期</label>
+        <input type="date" id="rDate">
+        <label for="rText">內容</label>
+        <textarea id="rText" placeholder="完成的事項、待辦、需要注意的情況…"></textarea>
+        <label>照片（最多 3 張，可不附）</label>
+        <div class="photos" id="photos"></div>
+        <input type="file" id="pick" accept="image/*" multiple class="hide">
+        <button class="big send" id="btnSend" onclick="send()">送出</button>
+        <div class="msg" id="mReport"></div>
+      </div>
+    </section>
+
+    <section id="schedule" class="hide">
+      <div class="card" id="schedList"><div class="empty">載入中…</div></div>
+    </section>
+  </main>
+</div>
+
+<footer><img alt="德化" src="logo-mark.png"></footer>
+
+<script src="app.js?v=2"></script>
+</body>
+</html>
