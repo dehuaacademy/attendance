@@ -1,5 +1,5 @@
 // ===== 設定：部署 Apps Script 後，把 /exec 網址貼在這裡 =====
-var API = 'PASTE_APPS_SCRIPT_EXEC_URL';
+var API = 'https://script.google.com/macros/s/AKfycby8HebCpG-vkz4_Gg6Lb0mfeAdu_dNPyLTGxxbLVMhLtMZyiysfUqaTbkVVng9t_OkW/exec';
 var MAX_PHOTOS = 3, PHOTO_MAX_SIDE = 1600, PHOTO_QUALITY = 0.7;
 var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 var AREAS = ['北一區', '北二區', '桃竹苗', '中區', '南區'], STAY_ROWS = 10;
