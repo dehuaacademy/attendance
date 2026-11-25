@@ -15,9 +15,17 @@ function leadGo(t, noRender) {
   if (!noRender) adRender();
 }
 
+// 管理者與前賢共用這個畫面；前賢只看得到排班、回報、公告，而且都不能修改
+var VIEW_TABS = ['sched', 'log', 'news'];
 function adminStart(r) {
-  ROLE = 'admin'; HOST = { body: 'adBody', msg: 'adMsg' }; adTab = 'people';
-  ['people', 'today', 'sched', 'log', 'news', 'settings'].forEach(function (x) { $('at-' + x).classList.toggle('on', x === 'people'); });
+  ROLE = r.role === 'viewer' ? 'viewer' : 'admin';
+  HOST = { body: 'adBody', msg: 'adMsg' }; adTab = ROLE === 'viewer' ? 'log' : 'people';
+  $('adWho').innerHTML = esc(r.name) + (ROLE === 'viewer' ? '<span class="role">唯讀</span>' : '');
+  $('at-log').textContent = ROLE === 'viewer' ? '回報' : '紀錄';
+  ['people', 'today', 'sched', 'log', 'news', 'settings'].forEach(function (x) {
+    $('at-' + x).classList.toggle('hide', ROLE === 'viewer' && VIEW_TABS.indexOf(x) < 0);
+    $('at-' + x).classList.toggle('on', x === adTab);
+  });
   show('admin');
   $('adToday').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
   adminLoad();
@@ -31,7 +39,9 @@ function adm(op, extra) {
   for (var k in (extra || {})) body[k] = extra[k];
   return apiPost(body);
 }
-function adMsg(t, err) { var m = $(HOST.msg); m.textContent = t || ''; m.className = 'msg ' + (err ? 'err' : 'ok'); if (t) setTimeout(function () { if (m.textContent === t) m.textContent = ''; }, 5000); }
+function adMsg(t, err) {
+  if (t && t !== '處理中…' && t !== '設定中…') toast((err ? '⚠️ ' : '') + t);   // 畫面捲到下面時也看得到結果
+  var m = $(HOST.msg); m.textContent = t || ''; m.className = 'msg ' + (err ? 'err' : 'ok'); if (t) setTimeout(function () { if (m.textContent === t) m.textContent = ''; }, 5000); }
 function adTabGo(t) {
   adTab = t;
   ['people', 'today', 'sched', 'log', 'news', 'settings'].forEach(function (x) { $('at-' + x).classList.toggle('on', x === t); });
@@ -46,7 +56,7 @@ function adDo(op, extra, okText) {
   }).catch(function (e) { busy = false; adMsg(e.message, true); });
 }
 function staffOpts(sel) {
-  return (AD.users || []).filter(function (u) { return u.role !== '管理者' && u.enabled; })
+  return (AD.users || []).filter(function (u) { return (u.role === '員工' || u.role === '組長') && u.enabled; })
     .map(function (u) { return '<option' + (u.name === sel ? ' selected' : '') + '>' + esc(u.name) + '</option>'; }).join('');
 }
 function dlabel(ds) { var d = new Date(ds + 'T00:00:00'); return (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）'; }
@@ -70,25 +80,27 @@ function adPeople() {
     if (u.role === '管理者') return;
     var n = esc(u.name), q = "'" + n.replace(/'/g, '') + "'";
     var bell = (AD.devices || {})[u.name] ? ' <small class="ok">🔔 通知已開</small>' : '';
-    var lead = u.role === '組長';
-    h += '<div class="prow' + (u.enabled ? '' : ' off') + '"><div class="pn"><b>' + n + (lead ? '<span class="role">組長</span>' : '') + bell + '</b><span>PIN ' + esc(u.pin) + (u.enabled ? '' : '・已停用') + '</span></div>'
+    var tag = u.role === '員工' ? '' : '<span class="role">' + esc(u.role) + '</span>';
+    h += '<div class="prow' + (u.enabled ? '' : ' off') + '"><div class="pn"><b>' + n + tag + bell + '</b><span>PIN ' + esc(u.pin) + (u.enabled ? '' : '・已停用') + '</span></div>'
        + '<div class="pb">'
        + (u.enabled ? '<button class="sb pri" onclick="adDevice(' + q + ')">設定這支手機</button>' : '')
        + '<button class="sb" onclick="adNewPin(' + q + ',this)">換 PIN</button>'
        + '<button class="sb" onclick="adToggle(' + q + ',' + !u.enabled + ')">' + (u.enabled ? '停用' : '啟用') + '</button>'
-       + (u.enabled ? '<button class="sb" onclick="adRole(' + q + ',\'' + (lead ? '員工' : '組長') + '\')">' + (lead ? '取消組長' : '設為組長') + '</button>' : '')
+       + (u.enabled ? '<select class="rsel" onchange="adRole(' + q + ',this.value)">' + ['員工', '組長', '前賢'].map(function (r) {
+             return '<option' + (r === u.role ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select>' : '')
        + '</div></div>';
   });
   h += '</div><div class="card"><h3 class="ah">新增人員</h3>'
      + '<input id="nuName" placeholder="姓名" maxlength="20">'
      + '<input id="nuPin" placeholder="PIN（4 位數，空白自動產生）" inputmode="numeric" maxlength="4">'
+     + '<select id="nuRole"><option value="員工">員工（同仁）</option><option value="前賢">前賢（唯讀，可多人共用）</option></select>'
      + '<button class="big send" onclick="adAddUser()">新增</button></div>';
   return h;
 }
 function adAddUser() {
   var name = $('nuName').value.trim(), pin = $('nuPin').value.trim();
   if (!name) { adMsg('請輸入姓名', true); return; }
-  adDo('addUser', { name: name, pin: pin }, function (r) { return '已新增 ' + r.name + '，PIN：' + r.pin; });
+  adDo('addUser', { name: name, pin: pin, role: $('nuRole').value }, function (r) { return '已新增 ' + r.name + (r.role === '前賢' ? '（前賢）' : '') + '，PIN：' + r.pin; });
 }
 var pinArm = '';
 function adNewPin(name, btn) {
@@ -96,7 +108,9 @@ function adNewPin(name, btn) {
   pinArm = '';
   adDo('setPin', { name: name }, function (r) { return r.name + ' 的新 PIN：' + r.pin + '（舊的已失效）'; });
 }
-function adRole(name, role) { adDo('setRole', { name: name, role: role }, role === '組長' ? name + ' 已設為組長（下次打開 App 會多一個「管理」分頁）' : name + ' 已改回一般同仁'); }
+function adRole(name, role) {
+  adDo('setRole', { name: name, role: role }, name + ' 已改為' + role + (role === '組長' ? '（下次打開 App 會多一個「管理」分頁）' : role === '前賢' ? '（只能看回報、排班、公告）' : ''));
+}
 function adToggle(name, en) { adDo('setEnabled', { name: name, enabled: en }, name + (en ? ' 已啟用' : ' 已停用')); }
 function adDevice(name) {
   if (busy) return;
@@ -104,8 +118,10 @@ function adDevice(name) {
   adm('device', { name: name }).then(function (r) {
     busy = false;
     store('dh_pin', r.pin); CODE = r.pin; AD = null;
-    show('app'); tab('clock'); load();
-    msg('mClock', '這支手機已設定為 ' + r.name + '，可以加到主畫面了', 'ok');
+    load().then(function (ok) {
+      if (ok === true) { show('app'); tab('clock'); msg('mClock', '這支手機已設定為 ' + r.name + '，可以加到主畫面了', 'ok'); }
+      else toast('這支手機已設定為 ' + r.name);
+    });
   }).catch(function (e) { busy = false; adMsg(e.message, true); });
 }
 
@@ -141,10 +157,10 @@ function adSched() {
     var tags = ppl.map(function (s) {
       var q = "'" + ds + "','" + esc(s.name).replace(/'/g, '') + "'";
       return '<span class="who">' + esc(s.name) + (s.start ? ' ' + esc(s.start) + (s.end ? '–' + esc(s.end) : '') : '') + (s.note ? '・' + esc(s.note) : '')
-           + ' <a class="x" onclick="adShiftCancel(' + q + ')">×</a></span>';
+           + (ROLE === 'viewer' ? '' : ' <a class="x" onclick="adShiftCancel(' + q + ')">×</a>') + '</span>';
     }).join('') || (i > 0 && i <= 7 ? '<span class="gap">缺人</span>' : '<span class="none">尚無人</span>');
     h += '<div class="row' + (d.getDay() === 0 || d.getDay() === 6 ? ' wk' : '') + '"><div class="dt"><b>' + (d.getMonth() + 1) + '/' + d.getDate() + '</b><small>' + (i === 0 ? '今天' : '週' + WEEK[d.getDay()]) + '</small></div>'
-       + '<div class="ppl">' + tags + '</div><button class="op" onclick="adSchedOpen(\'' + ds + '\')">＋</button></div>';
+       + '<div class="ppl">' + tags + '</div>' + (ROLE === 'viewer' ? '' : '<button class="op" onclick="adSchedOpen(\'' + ds + '\')">＋</button>') + '</div>';
     if (schedOpen === ds) {
       h += '<div class="sform"><select id="sfName">' + staffOpts() + '</select>'
          + '<input id="sfStart" type="time" value="08:30"><input id="sfEnd" type="time" value="17:00">'
@@ -173,7 +189,7 @@ function adShiftCancel(ds, name) {
 
 // ---- 紀錄 ----
 function adLog() {
-  var h = '<div class="card"><h3 class="ah">補登簽到／簽退</h3>'
+  var h = ROLE === 'viewer' ? '' : '<div class="card"><h3 class="ah">補登簽到／簽退</h3>'
     + '<select id="cfName">' + staffOpts() + '</select>'
     + '<div class="srow2"><input id="cfDate" type="date" value="' + AD.today + '" max="' + AD.today + '"><input id="cfTime" type="time" value="17:00">'
     + '<select id="cfType"><option>簽退</option><option>簽到</option></select></div>'
@@ -200,16 +216,16 @@ function adClockFix() {
 
 // ---- 公告 ----
 function adNews() {
-  var staff = (AD.users || []).filter(function (u) { return u.role !== '管理者' && u.enabled; });
+  var staff = (AD.users || []).filter(function (u) { return (u.role === '員工' || u.role === '組長') && u.enabled; });
   var on = staff.filter(function (u) { return (AD.devices || {})[u.name]; }).map(function (u) { return esc(u.name); });
   var off = staff.filter(function (u) { return !(AD.devices || {})[u.name]; }).map(function (u) { return esc(u.name); });
-  var h = pushCard('adPush')
-    + '<div class="card"><h3 class="ah">發公告給同仁</h3>'
+  var h = pushCard('adPush');
+  if (ROLE !== 'viewer') h += '<div class="card"><h3 class="ah">發公告給同仁</h3>'
     + '<input id="nwTitle" placeholder="標題（必填，40 字內）" maxlength="40">'
     + '<textarea id="nwBody" placeholder="內容（可空白）" maxlength="1000" style="min-height:110px"></textarea>'
     + '<button class="big send" id="btnNews" onclick="adAnnounce(this)">發送</button>'
-    + '<small>已開通知：' + (on.join('、') || '還沒有人') + (off.length ? '<br>還沒開通知：' + off.join('、') + '（他們仍可在 App「公告」看到）' : '') + '</small></div>'
-    + '<div class="card"><h3 class="ah">最近的公告</h3>' + (AD.news.length ? '' : '<div class="empty">還沒有公告</div>');
+    + '<small>已開通知：' + (on.join('、') || '還沒有人') + (off.length ? '<br>還沒開通知：' + off.join('、') + '（他們仍可在 App「公告」看到）' : '') + '</small></div>';
+  h += '<div class="card"><h3 class="ah">最近的公告</h3>' + (AD.news.length ? '' : '<div class="empty">還沒有公告</div>');
   AD.news.forEach(function (n) {
     h += '<div class="rep"><div><b>' + esc(n.title) + '</b><small>' + esc(n.time) + '・' + esc(n.by) + '</small></div>' + (n.body ? '<p>' + esc(n.body) + '</p>' : '') + '</div>';
   });

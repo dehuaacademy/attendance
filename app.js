@@ -67,7 +67,7 @@ function parse(r) {
 // ===== 載入狀態與班表 =====
 function load() {
   return apiGet({ action: 'status', u: CODE }).then(function (r) {
-    if (r.role === 'admin') { adminStart(r); return 'admin'; }
+    if (r.role === 'admin' || r.role === 'viewer') { adminStart(r); return 'admin'; }
     NAME = r.name;
     ROLE = r.leader ? 'leader' : 'staff';
     $('tab-lead').classList.toggle('hide', !r.leader);
