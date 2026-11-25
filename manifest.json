@@ -1,6 +1,6 @@
 {
-  "name": "德化 廟務打卡",
-  "short_name": "德化打卡",
+  "name": "德化廟務",
+  "short_name": "德化廟務",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

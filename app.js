@@ -10,6 +10,7 @@ function store(k, v) {
   catch (e) { return null; }
 }
 var CODE = store('dh_pin');
+var ROLE = 'staff';   // staff／leader／admin
 var NAME = '';
 var photos = []; // 已壓縮的 dataURL
 var busy = false;
@@ -36,17 +37,18 @@ function logout(text) {
   pushLogout();
   store('dh_pin', null); CODE = null; NAME = '';
   $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
-  AD = null; show('login'); msg('mLogin', text || '', text ? 'err' : '');
+  AD = null; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
   $('pin').focus();
 }
 
 function tab(t) {
-  ['clock', 'report', 'schedule', 'news'].forEach(function (x) {
+  ['clock', 'report', 'schedule', 'news', 'lead'].forEach(function (x) {
     $(x).classList.toggle('hide', x !== t);
     $('tab-' + x).classList.toggle('on', x === t);
   });
   if (t === 'schedule') load();
   if (t === 'news') newsSeen();
+  if (t === 'lead') leadStart();
 }
 
 // ===== 與後台溝通 =====
@@ -67,7 +69,10 @@ function load() {
   return apiGet({ action: 'status', u: CODE }).then(function (r) {
     if (r.role === 'admin') { adminStart(r); return 'admin'; }
     NAME = r.name;
-    $('who').textContent = r.name;
+    ROLE = r.leader ? 'leader' : 'staff';
+    $('tab-lead').classList.toggle('hide', !r.leader);
+    if (!r.leader && !$('lead').classList.contains('hide')) tab('clock');
+    $('who').innerHTML = esc(r.name) + (r.leader ? '<span class="role">組長</span>' : '');
     $('today').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
     if (!$('rDate').value) $('rDate').value = r.today;
     if (r.areas && r.areas.join() !== AREAS.join()) { AREAS = r.areas; buildStay(true); }

@@ -79,23 +79,25 @@ function pushLogout() {
 function pushCard(msgId) {
   var st = pushState(), body = '';
   if (st === 'off' || st === 'on') return '';
-  if (st === 'ask') body = '<p>開啟後，' + (AD ? '簽到退、異常回報、缺人提醒' : '公告和缺人提醒') + '會直接跳通知。</p>'
+  var what = ROLE === 'admin' ? '簽到退、異常回報、缺人提醒' : ROLE === 'leader' ? '簽到退、異常回報、缺人提醒和公告' : '公告和缺人提醒';
+  if (st === 'ask') body = '<p>開啟後，' + what + '會直接跳通知。</p>'
     + '<button class="big send" onclick="enablePush(this,\'' + msgId + '\')">開啟通知</button>';
-  if (st === 'ios-home') body = '<p>iPhone 要先在 Safari 按「分享 → 加入主畫面」，再從主畫面的「德化打卡」打開，才能開啟通知（需 iOS 16.4 以上）。</p>';
-  if (st === 'denied') body = '<p>這支手機關掉了通知。請到手機「設定 → 通知 → 德化打卡」改成允許，再重新打開 App。</p>';
+  if (st === 'ios-home') body = '<p>iPhone 要先在 Safari 按「分享 → 加入主畫面」，再從主畫面的「德化廟務」打開，才能開啟通知（需 iOS 16.4 以上）。</p>';
+  if (st === 'denied') body = '<p>這支手機關掉了通知。請到手機「設定 → 通知 → 德化廟務」改成允許，再重新打開 App。</p>';
   if (st === 'unsupported') body = '<p>這支手機目前不支援通知。Android 請用安裝包或 Chrome；iPhone 請更新到 iOS 16.4 以上並加到主畫面。</p>';
   return '<div class="card push"><label>🔔 通知</label>' + body + '<div class="msg" id="' + msgId + '"></div></div>';
 }
 function renderPushCards() {
   if ($('pushStaff')) $('pushStaff').innerHTML = pushCard('mPush');
-  if (AD && adTab === 'news') adRender();
+  if (ROLE === 'admin' && adTab === 'news') adRender();
 }
 
 // App 開著時收到推播：上方提示，並更新公告
 function onForegroundPush(p) {
   var n = (p && p.notification) || {};
   toast((n.title || '新通知') + (n.body ? '\n' + n.body : ''));
-  if (AD) adminLoad(); else if (CODE) load();
+  if (ROLE === 'admin') adminLoad();
+  else if (CODE) { load(); if (AD && !$('lead').classList.contains('hide')) adminLoad(); }
 }
 function toast(t) {
   var el = $('toast');

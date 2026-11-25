@@ -176,9 +176,9 @@
 			<key>IsRemovable</key>
 			<true/>
 			<key>Label</key>
-			<string>德化打卡</string>
+			<string>德化廟務</string>
 			<key>PayloadDisplayName</key>
-			<string>德化打卡</string>
+			<string>德化廟務</string>
 			<key>PayloadIdentifier</key>
 			<string>io.github.dehuaacademy.attendance.webclip</string>
 			<key>PayloadType</key>
@@ -194,9 +194,9 @@
 		</dict>
 	</array>
 	<key>PayloadDescription</key>
-	<string>在主畫面加入「德化打卡」圖示。只會新增一個捷徑，不會讀取或變更手機上的其他資料。</string>
+	<string>在主畫面加入「德化廟務」圖示。只會新增一個捷徑，不會讀取或變更手機上的其他資料。</string>
 	<key>PayloadDisplayName</key>
-	<string>德化 廟務打卡</string>
+	<string>德化廟務</string>
 	<key>PayloadIdentifier</key>
 	<string>io.github.dehuaacademy.attendance</string>
 	<key>PayloadOrganization</key>

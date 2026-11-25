@@ -6,12 +6,12 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#1C264D">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="德化打卡">
+<meta name="apple-mobile-web-app-title" content="德化廟務">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
-<title>德化 廟務打卡</title>
+<title>德化廟務</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{--navy:#1C264D;--gold:#F7CC71;--gray:#E6E6E6;--white:#fff}
@@ -21,7 +21,7 @@
   header .who{font-size:22px;font-weight:700;min-height:32px}
   header .date{font-size:14px;opacity:.8;margin-top:2px}
   nav{display:flex;background:var(--navy)}
-  nav button{flex:1;padding:12px;border:0;background:none;color:#fff;opacity:.6;font:inherit;font-size:16px;border-bottom:3px solid transparent}
+  nav button{flex:1;padding:12px 4px;white-space:nowrap;border:0;background:none;color:#fff;opacity:.6;font:inherit;font-size:16px;border-bottom:3px solid transparent}
   nav button.on{opacity:1;border-color:var(--gold);font-weight:700}
   #app{flex:1}
   main{padding:20px;max-width:480px;width:100%;margin:0 auto}
@@ -118,6 +118,7 @@
   .rep.new b::before{content:'● ';color:#c62828}
   #toast{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));background:var(--navy);color:#fff;border-radius:12px;padding:14px 16px;font-size:15px;white-space:pre-wrap;box-shadow:0 6px 20px rgba(0,0,0,.25);transform:translateY(-150%);transition:transform .3s;z-index:9;border-left:5px solid var(--gold)}
   #toast.on{transform:none}
+  .role{font-size:12px;background:var(--gold);color:var(--navy);border-radius:10px;padding:1px 8px;margin-left:6px;font-weight:700}
   .switch{float:right;margin-top:4px;background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:14px;padding:3px 10px;font:inherit;font-size:12px;font-weight:400}
 </style>
 </head>
@@ -127,7 +128,7 @@
 
 <div id="login" class="login hide">
   <div class="card">
-    <h2>德化 廟務打卡</h2>
+    <h2>德化廟務</h2>
     <label for="pin">請輸入個人 PIN 碼</label>
     <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="4 位數字">
     <button class="big in" id="btnLogin" onclick="login()">進入</button>
@@ -142,10 +143,11 @@
     <div class="date" id="today"></div>
   </header>
   <nav>
-    <button id="tab-clock" class="on" onclick="tab('clock')">簽到/簽退</button>
+    <button id="tab-clock" class="on" onclick="tab('clock')">簽到退</button>
     <button id="tab-report" onclick="tab('report')">回報</button>
     <button id="tab-schedule" onclick="tab('schedule')">班表</button>
     <button id="tab-news" onclick="tab('news')">公告</button>
+    <button id="tab-lead" class="hide" onclick="tab('lead')">管理</button>
   </nav>
   <main>
     <section id="clock">
@@ -186,6 +188,12 @@
       <div class="card" id="newsList"><div class="empty">載入中…</div></div>
     </section>
 
+    <section id="lead" class="hide">
+      <div class="seg"><button id="lg-today" class="on" onclick="leadGo('today')">今日</button><button id="lg-sched" onclick="leadGo('sched')">排班</button><button id="lg-log" onclick="leadGo('log')">紀錄</button></div>
+      <div class="msg" id="leadMsg"></div>
+      <div id="leadBody"><div class="empty">載入中…</div></div>
+    </section>
+
     <section id="schedule" class="hide">
       <div class="msg" id="mSched"></div>
       <div class="card sched" id="schedList"><div class="empty">載入中…</div></div>
@@ -212,8 +220,8 @@
 <div id="toast"></div>
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=8"></script>
-<script src="admin.js?v=2"></script>
-<script src="push.js?v=1"></script>
+<script src="app.js?v=9"></script>
+<script src="admin.js?v=3"></script>
+<script src="push.js?v=2"></script>
 </body>
 </html>

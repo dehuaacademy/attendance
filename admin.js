@@ -1,8 +1,23 @@
 // ===== 管理者介面（管理者 PIN 登入後顯示）=====
 var AD = null;          // overview 資料
 var adTab = 'people';
+var HOST = { body: 'adBody', msg: 'adMsg' };   // 管理者畫面；組長用「管理」分頁
+
+// 組長：在員工畫面的「管理」分頁，只有今日、排班、紀錄（含補登）
+function leadStart() {
+  HOST = { body: 'leadBody', msg: 'leadMsg' };
+  leadGo(adTab === 'sched' || adTab === 'log' ? adTab : 'today', true);
+  adminLoad();
+}
+function leadGo(t, noRender) {
+  adTab = t;
+  ['today', 'sched', 'log'].forEach(function (x) { $('lg-' + x).classList.toggle('on', x === t); });
+  if (!noRender) adRender();
+}
 
 function adminStart(r) {
+  ROLE = 'admin'; HOST = { body: 'adBody', msg: 'adMsg' }; adTab = 'people';
+  ['people', 'today', 'sched', 'log', 'news', 'settings'].forEach(function (x) { $('at-' + x).classList.toggle('on', x === 'people'); });
   show('admin');
   $('adToday').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
   adminLoad();
@@ -16,7 +31,7 @@ function adm(op, extra) {
   for (var k in (extra || {})) body[k] = extra[k];
   return apiPost(body);
 }
-function adMsg(t, err) { var m = $('adMsg'); m.textContent = t || ''; m.className = 'msg ' + (err ? 'err' : 'ok'); if (t) setTimeout(function () { if (m.textContent === t) m.textContent = ''; }, 5000); }
+function adMsg(t, err) { var m = $(HOST.msg); m.textContent = t || ''; m.className = 'msg ' + (err ? 'err' : 'ok'); if (t) setTimeout(function () { if (m.textContent === t) m.textContent = ''; }, 5000); }
 function adTabGo(t) {
   adTab = t;
   ['people', 'today', 'sched', 'log', 'news', 'settings'].forEach(function (x) { $('at-' + x).classList.toggle('on', x === t); });
@@ -31,7 +46,7 @@ function adDo(op, extra, okText) {
   }).catch(function (e) { busy = false; adMsg(e.message, true); });
 }
 function staffOpts(sel) {
-  return (AD.users || []).filter(function (u) { return u.role === '員工' && u.enabled; })
+  return (AD.users || []).filter(function (u) { return u.role !== '管理者' && u.enabled; })
     .map(function (u) { return '<option' + (u.name === sel ? ' selected' : '') + '>' + esc(u.name) + '</option>'; }).join('');
 }
 function dlabel(ds) { var d = new Date(ds + 'T00:00:00'); return (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）'; }
@@ -45,7 +60,7 @@ function adRender() {
   if (adTab === 'log') h = adLog();
   if (adTab === 'news') h = adNews();
   if (adTab === 'settings') h = adSettings();
-  $('adBody').innerHTML = h;
+  $(HOST.body).innerHTML = h;
 }
 
 // ---- 人員 ----
@@ -55,11 +70,13 @@ function adPeople() {
     if (u.role === '管理者') return;
     var n = esc(u.name), q = "'" + n.replace(/'/g, '') + "'";
     var bell = (AD.devices || {})[u.name] ? ' <small class="ok">🔔 通知已開</small>' : '';
-    h += '<div class="prow' + (u.enabled ? '' : ' off') + '"><div class="pn"><b>' + n + bell + '</b><span>PIN ' + esc(u.pin) + (u.enabled ? '' : '・已停用') + '</span></div>'
+    var lead = u.role === '組長';
+    h += '<div class="prow' + (u.enabled ? '' : ' off') + '"><div class="pn"><b>' + n + (lead ? '<span class="role">組長</span>' : '') + bell + '</b><span>PIN ' + esc(u.pin) + (u.enabled ? '' : '・已停用') + '</span></div>'
        + '<div class="pb">'
        + (u.enabled ? '<button class="sb pri" onclick="adDevice(' + q + ')">設定這支手機</button>' : '')
        + '<button class="sb" onclick="adNewPin(' + q + ',this)">換 PIN</button>'
        + '<button class="sb" onclick="adToggle(' + q + ',' + !u.enabled + ')">' + (u.enabled ? '停用' : '啟用') + '</button>'
+       + (u.enabled ? '<button class="sb" onclick="adRole(' + q + ',\'' + (lead ? '員工' : '組長') + '\')">' + (lead ? '取消組長' : '設為組長') + '</button>' : '')
        + '</div></div>';
   });
   h += '</div><div class="card"><h3 class="ah">新增人員</h3>'
@@ -79,6 +96,7 @@ function adNewPin(name, btn) {
   pinArm = '';
   adDo('setPin', { name: name }, function (r) { return r.name + ' 的新 PIN：' + r.pin + '（舊的已失效）'; });
 }
+function adRole(name, role) { adDo('setRole', { name: name, role: role }, role === '組長' ? name + ' 已設為組長（下次打開 App 會多一個「管理」分頁）' : name + ' 已改回一般同仁'); }
 function adToggle(name, en) { adDo('setEnabled', { name: name, enabled: en }, name + (en ? ' 已啟用' : ' 已停用')); }
 function adDevice(name) {
   if (busy) return;
@@ -159,7 +177,7 @@ function adLog() {
     + '<select id="cfName">' + staffOpts() + '</select>'
     + '<div class="srow2"><input id="cfDate" type="date" value="' + AD.today + '" max="' + AD.today + '"><input id="cfTime" type="time" value="17:00">'
     + '<select id="cfType"><option>簽退</option><option>簽到</option></select></div>'
-    + '<button class="big send" onclick="adClockFix()">補登</button><small>紀錄會標示「管理者補登」，統計會一起算進去</small></div>';
+    + '<button class="big send" onclick="adClockFix()">補登</button><small>紀錄會標示「' + (ROLE === 'leader' ? '組長' : '管理者') + '補登」，統計會一起算進去</small></div>';
   h += '<div class="card"><h3 class="ah">最近的事務回報</h3>' + (AD.reports.length ? '' : '<div class="empty">還沒有回報</div>');
   AD.reports.forEach(function (r) {
     h += '<div class="rep"><div><b>' + esc(r.name) + '</b> <span class="kind' + (r.kind === '異常回報' ? ' bad' : '') + '">' + esc(r.kind) + '</span><small>' + esc(r.date) + ' ' + esc(r.time) + '</small></div>'
@@ -182,7 +200,7 @@ function adClockFix() {
 
 // ---- 公告 ----
 function adNews() {
-  var staff = (AD.users || []).filter(function (u) { return u.role === '員工' && u.enabled; });
+  var staff = (AD.users || []).filter(function (u) { return u.role !== '管理者' && u.enabled; });
   var on = staff.filter(function (u) { return (AD.devices || {})[u.name]; }).map(function (u) { return esc(u.name); });
   var off = staff.filter(function (u) { return !(AD.devices || {})[u.name]; }).map(function (u) { return esc(u.name); });
   var h = pushCard('adPush')
@@ -218,7 +236,17 @@ function adSettings() {
     else h += '<input id="st' + i + '" data-k="' + esc(k) + '" value="' + esc(v) + '"' + (/公尺|天數/.test(k) ? ' inputmode="numeric"' : '') + '>';
     if (s[k].note) h += '<small class="note">' + esc(s[k].note) + '</small>';
   });
-  return h + '<button class="big send" onclick="adSaveSettings()">儲存設定</button><small>儲存後立即生效，員工下次打開 App 就會看到新的區域選項</small></div>';
+  return h + '<button class="big send" onclick="adSaveSettings()">儲存設定</button><small>儲存後立即生效，員工下次打開 App 就會看到新的區域選項</small></div>'
+    + '<div class="card"><h3 class="ah">更換管理者 PIN</h3>'
+    + '<input id="apPin" type="password" inputmode="numeric" maxlength="6" placeholder="新的 6 位數 PIN" autocomplete="off">'
+    + '<input id="apPin2" type="password" inputmode="numeric" maxlength="6" placeholder="再輸入一次" autocomplete="off">'
+    + '<button class="big in" onclick="adAdminPin()">更換</button><small>換完後舊的 PIN 立即失效；其他已用舊 PIN 登入的管理者手機需要重新輸入</small></div>';
+}
+function adAdminPin() {
+  var a = $('apPin').value.trim(), b2 = $('apPin2').value.trim();
+  if (!/^\d{6}$/.test(a)) { adMsg('請輸入 6 位數字', true); return; }
+  if (a !== b2) { adMsg('兩次輸入不一樣', true); return; }
+  adDo('adminPin', { pin: a }, function (r) { store('dh_pin', r.pin); CODE = r.pin; return '管理者 PIN 已更換，請記好新的 PIN'; });
 }
 function adSaveSettings() {
   var v = {};
