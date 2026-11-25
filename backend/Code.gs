@@ -1,12 +1,12 @@
 /**
- * 德化宮 廟務總管小組｜簽到退＋回報＋自選排班＋管理者介面＋App 推播與公告 後台（v5）
+ * 德化廟務 App（德化宮 廟務總管小組）｜簽到退＋回報＋自選排班＋管理者／組長介面＋App 推播與公告 後台（v5.3）
  * 這份程式碼放在公開的 GitHub（dehuaacademy/attendance/backend），不可寫入任何密碼或頻道名稱。
  * 更新方式：推到 GitHub 後，由獨立的「德化更新器」自動安裝並更新部署（見維護說明）。
  * 綁定在試算表「德化 廟務打卡紀錄」上，部署成網頁應用程式，只回傳資料（JSON），不負責畫面。
  * 前台網頁放在 GitHub Pages：https://dehuaacademy.github.io/attendance/
  *
  * 試算表分頁：
- *   人員     PIN｜姓名｜啟用（是／否）｜角色（員工／管理者） ← App 管理介面或這裡都能改
+ *   人員     PIN｜姓名｜啟用（是／否）｜角色（員工／組長／管理者） ← App 管理介面或這裡都能改
  *   設定     項目｜值｜說明  ← 區域、定位範圍、可排班天數、推播開關；App 管理介面可改
  *   操作紀錄 管理者在 App 上的每一個操作
  *   排班表   員工在 App 自選日期登記／取消（系統寫入）；管理者也可以直接加列或改狀態
@@ -15,12 +15,12 @@
  *   住廟回報 每位住廟者一列：送出日期｜回報人｜區域｜姓名（送出日期即住廟日期）
  *   推播裝置 每支開啟通知的手機一列（App 自動登記；失效的會標示，不用手動整理）
  *   公告     管理者在 App 發的公告
- *   統計     每天自動更新（也可從選單「德化打卡 → 更新統計」手動更新），不在 App 顯示
+ *   統計     每天自動更新（也可從選單「德化廟務 → 更新統計」手動更新），不在 App 顯示
  *
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.2';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.3';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -130,7 +130,7 @@ function status_(code) {
   var today = fmt_(new Date(), 'yyyy-MM-dd');
   if (who.role === '管理者') return { name: who.name, role: 'admin', today: today };
   var name = who.name;
-  var res = { name: name, today: today, clock: { 簽到: null, 簽退: null }, schedule: [] };
+  var res = { name: name, leader: who.role === '組長', today: today, clock: { 簽到: null, 簽退: null }, schedule: [] };
 
   var sh = sheet_('clock');
   var last = sh.getLastRow();
@@ -320,7 +320,7 @@ function updateStats() {
 
 // 試算表上方選單
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('德化打卡')
+  SpreadsheetApp.getUi().createMenu('德化廟務')
     .addItem('更新統計', 'updateStats')
     .addItem('立即檢查未來 7 天排班', 'dailyCheck')
     .addToUi();
@@ -349,12 +349,13 @@ function stay_(b) {
 // ===== 管理者介面 =====
 function admin_(b) {
   var me = auth_(b.u);
-  if (me.role !== '管理者') throw new Error('沒有管理權限');
+  var LEADER_OPS = ['overview', 'shift', 'clockFix'];   // 組長可以做的管理操作
+  if (me.role !== '管理者' && !(me.role === '組長' && LEADER_OPS.indexOf(b.op) >= 0)) throw new Error('沒有管理權限');
   var op = b.op, today = day_(0), r;
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    if (op === 'overview') return overview_(today);
+    if (op === 'overview') return overview_(today, me.role === '管理者');
 
     if (op === 'addUser') {
       var name = String(b.name || '').trim();
@@ -372,7 +373,23 @@ function admin_(b) {
       if (!target && op !== 'shift' && op !== 'clockFix') throw new Error('找不到「' + b.name + '」');
     }
 
-    if ((op === 'setPin' || op === 'setEnabled' || op === 'device') && !target) throw new Error('請選擇人員');
+    if ((op === 'setPin' || op === 'setEnabled' || op === 'device' || op === 'setRole') && !target) throw new Error('請選擇人員');
+
+    if (op === 'setRole') {
+      if (target.role === '管理者') throw new Error('管理者帳號不能改角色');
+      var role = b.role === '組長' ? '組長' : '員工';
+      sheet_('users').getRange(target.row, 4).setValue(role);
+      log_(me.name, role === '組長' ? '設為組長' : '取消組長', target.name);
+      return { name: target.name, role: role };
+    }
+    if (op === 'adminPin') {
+      var np = String(b.pin || '').trim();
+      if (!/^\d{6}$/.test(np)) throw new Error('管理者 PIN 要 6 位數字');
+      if (users_().some(function (u) { return u.pin === np && u.row !== me.row; })) throw new Error('這組 PIN 已經有人用了');
+      sheet_('users').getRange(me.row, 1).setValue("'" + np);
+      log_(me.name, '更換管理者 PIN', '');
+      return { pin: np };
+    }
 
     if (op === 'setPin') {
       if (target.role === '管理者' && !b.pin) throw new Error('管理者 PIN 請自行指定 6 位數');
@@ -390,13 +407,13 @@ function admin_(b) {
       return { name: target.name, enabled: !!b.enabled };
     }
     if (op === 'device') {
-      if (!target || target.role !== '員工' || !target.enabled) throw new Error('只能設定已啟用的員工');
+      if (!target || target.role === '管理者' || !target.enabled) throw new Error('只能設定已啟用的員工');
       log_(me.name, '設定手機登入', target.name);
       return { name: target.name, pin: target.pin };
     }
 
     if (op === 'shift') {
-      if (!target || target.role !== '員工') throw new Error('請選擇員工');
+      if (!target || target.role === '管理者') throw new Error('請選擇員工');
       var date = normDate_(b.date);
       if (!date || date < today || date > day_(cfg_().days - 1)) throw new Error('日期超出可排班範圍');
       var sh = sheet_('schedule');
@@ -410,7 +427,7 @@ function admin_(b) {
         sh.getRange(mine[0].row, 3, 1, 3).setValues([[st ? "'" + st : '', en ? "'" + en : '', note]]);
         log_(me.name, '修改排班', target.name + ' ' + date + ' ' + st + '-' + en + ' ' + note);
       } else {
-        sh.appendRow(["'" + date, target.name, st ? "'" + st : '', en ? "'" + en : '', note, '管理者', '已登記', new Date(), '']);
+        sh.appendRow(["'" + date, target.name, st ? "'" + st : '', en ? "'" + en : '', note, me.role, '已登記', new Date(), '']);
         log_(me.name, '新增排班', target.name + ' ' + date + ' ' + st + '-' + en + ' ' + note);
       }
       SpreadsheetApp.flush();
@@ -418,12 +435,12 @@ function admin_(b) {
     }
 
     if (op === 'clockFix') {
-      if (!target || target.role !== '員工') throw new Error('請選擇員工');
+      if (!target || target.role === '管理者') throw new Error('請選擇員工');
       var d = normDate_(b.date), t = hhmmIn_(b.time);
       if (!d || d > today) throw new Error('日期錯誤');
       if (!t) throw new Error('請輸入時間');
       if (b.type !== '簽到' && b.type !== '簽退') throw new Error('類型錯誤');
-      sheet_('clock').appendRow(["'" + d, "'" + t + ':00', target.name, b.type, '管理者補登', '', '', '', '', new Date()]);
+      sheet_('clock').appendRow(["'" + d, "'" + t + ':00', target.name, b.type, me.role === '管理者' ? '管理者補登' : '組長補登', '', '', '', '', new Date()]);
       log_(me.name, '補登' + b.type, target.name + ' ' + d + ' ' + t);
       return { ok2: true };
     }
@@ -450,13 +467,13 @@ function admin_(b) {
       return { ok2: true };
     }
 
-    if (op === 'notifyTest') return notify_('🔧 德化打卡通知測試', '管理者送出的測試通知', 3);
+    if (op === 'notifyTest') return notify_('🔧 德化廟務通知測試', '管理者送出的測試通知', 3);
 
     if (op === 'announce') {
       var title = String(b.title || '').trim(), body = String(b.body || '').trim();
       if (!title || title.length > 40) throw new Error('標題請填 1–40 字');
       if (body.length > 1000) throw new Error('內容最多 1000 字');
-      var res = fcm_(devices_('員工'), '📢 ' + title, body || title, 'news');
+      var res = fcm_(devices_(['員工', '組長']), '📢 ' + title, body || title, 'news');
       sheet_('news').appendRow(["'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm'), me.name, title, body, res.sent]);
       log_(me.name, '發公告', title + '（送達 ' + res.sent + ' 支手機）');
       return { sent: res.sent, error: res.error || '' };
@@ -465,9 +482,9 @@ function admin_(b) {
   } finally { lock.releaseLock(); }
 }
 
-function overview_(today) {
+function overview_(today, full) {
   var c = cfg_();
-  var users = users_().map(function (u) { return { name: u.name, pin: u.role === '管理者' ? '' : u.pin, enabled: u.enabled, role: u.role }; });
+  var users = users_().map(function (u) { return { name: u.name, pin: full && u.role !== '管理者' ? u.pin : '', enabled: u.enabled, role: u.role }; });
 
   var clock = [], ck = sheet_('clock'), n = ck.getLastRow() - 1;
   if (n > 0) {
@@ -497,8 +514,8 @@ function overview_(today) {
   return {
     today: today, days: c.days, users: users, clock: clock,
     schedule: shifts_(today, day_(c.days - 1)).map(function (s) { return { date: s.date, name: s.name, start: s.start, end: s.end, note: s.note }; }),
-    reports: reports, stays: stays, settings: settings,
-    news: news_(CONFIG.NEWS_MAX), devices: deviceCount_()
+    reports: reports, stays: stays, settings: full ? settings : {},
+    news: news_(CONFIG.NEWS_MAX), devices: deviceCount_(), role: full ? 'admin' : 'leader'
   };
 }
 
@@ -529,7 +546,7 @@ function log_(who, action, detail) {
 function notify_(title, message, priority, audience) {
   var c = cfg_(), toAdmin = 0, ntfyOk = false, rep = { fcm: '', ntfy: '', mail: '' };
   try {
-    var list = devices_(audience === 'all' ? null : '管理者');
+    var list = devices_(audience === 'all' ? null : ['管理者', '組長']);
     var r = fcm_(list, title, message, audience === 'all' ? 'all' : 'admin');
     toAdmin = r.sentAdmin;
     rep.fcm = '裝置 ' + list.length + '、送達 ' + r.sent + (r.error ? '、' + r.error : '');
@@ -549,7 +566,7 @@ function notify_(title, message, priority, audience) {
   if (!toAdmin && !ntfyOk) {
     try {
       // 主旨固定，讓 Gmail 歸在同一串，不會一直冒出新信
-      MailApp.sendEmail(c.mailTo || Session.getEffectiveUser().getEmail(), '[德化打卡] 推播未送達紀錄',
+      MailApp.sendEmail(c.mailTo || Session.getEffectiveUser().getEmail(), '[德化廟務] 推播未送達紀錄',
                         fmt_(new Date(), 'yyyy-MM-dd HH:mm') + '\n' + title + '\n' + message
                         + '\n\n（管理者手機沒有收到 App 推播時，才會寄這封備份）');
       rep.mail = '已寄出';
@@ -558,13 +575,17 @@ function notify_(title, message, priority, audience) {
   return rep;
 }
 
-// 推播裝置：[{row, token, name, role}]，只取狀態「有效」；role 為 null 時全部
-function devices_(role) {
+// 推播裝置：[{row, token, name, role}]，只取狀態「有效」；roles 為 null 時全部
+// 角色以「人員」分頁目前的設定為準（指定或取消組長後立即生效），停用的人不推
+function devices_(roles) {
   var sh = sheet_('devices'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
+  var cur = {};
+  users_().forEach(function (u) { cur[u.name] = u; });
   return sh.getRange(2, 1, n, 7).getDisplayValues().map(function (r, i) {
-    return { row: i + 2, token: r[0], name: r[1], role: r[2], status: r[6] };
-  }).filter(function (d) { return d.token && d.status === '有效' && (!role || d.role === role); });
+    var u = cur[r[1]];
+    return { row: i + 2, token: r[0], name: r[1], role: u ? u.role : r[2], ok: !!(u && u.enabled), status: r[6] };
+  }).filter(function (d) { return d.token && d.ok && d.status === '有效' && (!roles || roles.indexOf(d.role) >= 0); });
 }
 function deviceCount_() {
   var out = {};
@@ -595,7 +616,7 @@ function fcm_(list, title, body, tag) {
   var res = UrlFetchApp.fetchAll(reqs), sent = 0, sentAdmin = 0, error = '', dead = [];
   res.forEach(function (r, i) {
     var code = r.getResponseCode();
-    if (code < 300) { sent++; if (list[i].role === '管理者') sentAdmin++; return; }
+    if (code < 300) { sent++; if (list[i].role !== '員工') sentAdmin++; return; }
     var t = r.getContentText();
     if (code === 404 || /UNREGISTERED|registration-token-not-registered|INVALID_ARGUMENT.*token|not a valid FCM registration token/i.test(t)) { if (list[i].row) dead.push(list[i].row); }
     else error = 'FCM ' + code + '：' + t.slice(0, 200);
@@ -625,7 +646,7 @@ function push_(b) {
     else sh.appendRow([token, who.name, who.role, dev, now, now, '有效']);
   } finally { lock.releaseLock(); }
   if (b.op === 'test') {
-    var r = fcm_([{ token: token, role: who.role, row: 0 }], '✅ 德化打卡通知已開啟', who.name + '，之後的' + (who.role === '管理者' ? '通知' : '公告和缺人提醒') + '會顯示在這裡', 'test');
+    var r = fcm_([{ token: token, role: who.role, row: 0 }], '✅ 德化廟務通知已開啟', who.name + '，之後的' + (who.role === '員工' ? '公告和缺人提醒' : who.role === '組長' ? '簽到退、異常回報、缺人提醒和公告' : '簽到退、異常回報和缺人提醒') + '會顯示在這裡', 'test');
     if (!r.sent) throw new Error('已登記，但測試通知沒送出：' + (r.error || '請稍後再試'));
   }
   return { registered: true };
@@ -647,7 +668,7 @@ function users_() {
   var sh = sheet_('users'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
   return sh.getRange(2, 1, n, 4).getDisplayValues().map(function (r, i) {
-    return { row: i + 2, pin: String(r[0]).trim(), name: String(r[1]).trim(), enabled: r[2] !== '否', role: r[3] === '管理者' ? '管理者' : '員工' };
+    return { row: i + 2, pin: String(r[0]).trim(), name: String(r[1]).trim(), enabled: r[2] !== '否', role: r[3] === '管理者' ? '管理者' : r[3] === '組長' ? '組長' : '員工' };
   }).filter(function (u) { return u.name; });
 }
 function auth_(code) {
@@ -739,5 +760,5 @@ function setup() {
   });
   ScriptApp.newTrigger('dailyCheck').timeBased().everyDays(1).atHour(CONFIG.GAP_CHECK_HOUR).inTimezone(CONFIG.TZ).create();
   updateStats();
-  notify_('✅ 德化打卡通知測試', '收到這則就代表推播設定成功', 3);
+  notify_('✅ 德化廟務通知測試', '收到這則就代表推播設定成功', 3);
 }
