@@ -9,7 +9,7 @@ function store(k, v) {
   try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); }
   catch (e) { return null; }
 }
-var CODE = store('dh_pin');
+var CODE = store('dh_id') || store('dh_pin');   // 「姓名|PIN」；舊版只存 PIN，打開後會自動升級
 var ROLE = 'staff';   // staff／leader／admin
 var NAME = '';
 var photos = []; // 已壓縮的 dataURL
@@ -30,22 +30,43 @@ function invalid(text) { $('app').classList.add('hide'); $('invalidText').textCo
 function show(id) { ['app', 'login', 'invalid', 'admin'].forEach(function (x) { $(x).classList.toggle('hide', x !== id); }); }
 
 function login() {
-  var pin = $('pin').value.trim();
+  var name = $('lname').value.trim(), pin = $('pin').value.trim();
+  if (!name) { msg('mLogin', '請輸入姓名', 'err'); return; }
   if (!/^\d{4}$|^\d{6}$/.test(pin)) { msg('mLogin', '請輸入 PIN 碼', 'err'); return; }
   $('btnLogin').disabled = true; msg('mLogin', '確認中…');
-  CODE = pin;
+  CODE = name + '|' + pin;
   load().then(function (ok) {
     $('btnLogin').disabled = false;
-    if (ok) { store('dh_pin', pin); $('pin').value = ''; msg('mLogin', ''); if (ok !== 'admin') show('app'); }
+    if (ok) { store('dh_id', CODE); store('dh_pin', null); store('dh_lastname', name); $('pin').value = ''; msg('mLogin', ''); if (ok !== 'admin') show('app'); }
   });
+}
+function setCode(name, pin) { CODE = name + '|' + pin; store('dh_id', CODE); store('dh_pin', null); store('dh_lastname', name); }
+
+// ===== 自己改 PIN（前賢是共用帳號，不開放）=====
+var myPinLen = 4;
+function myPinOpen() {
+  myPinLen = ROLE === 'admin' ? 6 : 4;
+  ['mpA', 'mpB'].forEach(function (i) { $(i).value = ''; $(i).maxLength = myPinLen; $(i).placeholder = (i === 'mpA' ? '新的 ' : '再輸入一次 ') + myPinLen + ' 位數 PIN'; });
+  msg('mPin', ''); $('pinBox').classList.remove('hide'); $('mpA').focus();
+}
+function myPinClose() { $('pinBox').classList.add('hide'); }
+function myPinSave() {
+  var a = $('mpA').value.trim(), b = $('mpB').value.trim();
+  if (!new RegExp('^\\d{' + myPinLen + '}$').test(a)) { msg('mPin', '請輸入 ' + myPinLen + ' 位數字', 'err'); return; }
+  if (a !== b) { msg('mPin', '兩次輸入不一樣', 'err'); return; }
+  msg('mPin', '更改中…');
+  apiPost({ action: 'me', op: 'pin', u: CODE, pin: a }).then(function (r) {
+    setCode(r.name, r.pin); myPinClose(); toast('PIN 已更改，請記好新的 PIN。其他手機下次打開要重新登入');
+  }).catch(function (e) { msg('mPin', e.message === 'Failed to fetch' ? '網路異常，請再試一次' : e.message, 'err'); });
 }
 function logout(text) {
   pushLogout();
   lock(false); msg('mClock', '');
-  store('dh_pin', null); CODE = null; NAME = '';
+  store('dh_pin', null); store('dh_id', null); CODE = null; NAME = ''; myPinClose();
   $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
   AD = null; CASH = null; cashArm = ''; cashPh = []; crPh = []; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
-  $('pin').focus();
+  if (!$('lname').value) $('lname').value = store('dh_lastname') || '';
+  ($('lname').value ? $('pin') : $('lname')).focus();
 }
 
 function tab(t) {
@@ -78,6 +99,7 @@ function load() {
   var who = CODE;
   return apiGet({ action: 'status', u: CODE }).then(function (r) {
     if (CODE !== who) return false;
+    if (CODE.indexOf('|') < 0 && r.name) { setCode(r.name, CODE); who = CODE; }   // 舊版只存 PIN → 升級成「姓名|PIN」
     store(cacheKey('st'), JSON.stringify(r));
     if (r.role === 'admin' || r.role === 'viewer') {
       var want = r.role === 'viewer' ? 'viewer' : 'admin';
@@ -88,7 +110,7 @@ function load() {
     syncPush();
     return true;
   }).catch(function (e) {
-    if (/PIN/.test(e.message)) logout('PIN 錯誤或已停用，請重新輸入');
+    if (/PIN/.test(e.message)) logout(e.message);
     else if (!$('app').classList.contains('hide')) { msg('mClock', '無法連線，畫面是上次的資料，請確認網路後重新整理', 'err'); }
     else if (!$('admin').classList.contains('hide')) adMsg('無法連線，畫面是上次的資料', true);
     else msg('mLogin', '無法連線，請確認網路後再試', 'err');
@@ -300,7 +322,7 @@ function canAutoRender() {
   if (typeof schedOpen !== 'undefined' && schedOpen) return false;          // 排班表單開著
   if (ROLE === 'admin' && adTab === 'settings') return false;
   if (typeof cashTyping === 'function' && cashTyping()) return false;
-  return !['nuName', 'nuPin', 'nwTitle', 'nwBody', 'apPin'].some(function (id) { return $(id) && $(id).value; });
+  return !['nuName', 'nuPin', 'nwTitle', 'nwBody', 'apPin', 'mpA'].some(function (id) { return $(id) && $(id).value; });
 }
 function refresh(force) {
   if (!CODE || document.hidden) return;
@@ -317,7 +339,7 @@ document.addEventListener('visibilitychange', function () { if (!document.hidden
 setInterval(function () { refresh(); }, 60000);
 
 // ===== 啟動 =====
-document.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.id === 'pin') login(); });
+document.addEventListener('keydown', function (e) { if (e.key !== 'Enter') return; if (e.target.id === 'pin') login(); if (e.target.id === 'lname') $('pin').focus(); });
 if (!/^https?:\/\//.test(API)) invalid('系統尚未設定完成');
 else {
   $('rDate').value = todayStr();
@@ -325,6 +347,7 @@ else {
   buildStay(false);
   // 管理者 PIN 是 6 位數
   $('pin').maxLength = 6; $('pin').placeholder = 'PIN 碼';
+  $('lname').value = store('dh_lastname') || '';
   // 等 admin.js、push.js 也載入完再啟動
   document.addEventListener('DOMContentLoaded', function () {
     if (CODE) { startCached(); load(); } else show('login');

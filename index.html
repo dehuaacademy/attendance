@@ -137,6 +137,9 @@
   .chint{color:#b26a00;font-size:14px;min-height:20px;margin-bottom:6px}
   .citem .pb{margin-top:8px}.citem .sform{margin-top:8px}
   .adnav button{font-size:14px}
+  #lname{letter-spacing:normal;font-size:20px}
+  #pinBox{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9;display:flex;align-items:center;justify-content:center;padding:20px}
+  #pinBox .card{width:100%;max-width:400px}
   .switch{float:right;margin-top:4px;background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:14px;padding:3px 10px;font:inherit;font-size:12px;font-weight:400}
 </style>
 </head>
@@ -147,8 +150,10 @@
 <div id="login" class="login hide">
   <div class="card">
     <h2>德化廟務</h2>
-    <label for="pin">請輸入個人 PIN 碼</label>
-    <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="4 位數字">
+    <label for="lname">姓名</label>
+    <input id="lname" maxlength="20" autocomplete="username" placeholder="你的姓名">
+    <label for="pin">PIN 碼</label>
+    <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password" placeholder="4 位數字">
     <button class="big in" id="btnLogin" onclick="login()">進入</button>
     <div class="msg" id="mLogin"></div>
     <small>第一次輸入後，這支手機會記住你，之後不用再輸入</small>
@@ -157,7 +162,7 @@
 
 <div id="app" class="hide">
   <header>
-    <div class="who"><span id="who">載入中…</span><button class="switch" onclick="logout()">切換使用者</button><button class="switch" onclick="refresh(true)" aria-label="重新整理">↻</button></div>
+    <div class="who"><span id="who">載入中…</span><button class="switch" onclick="logout()">切換使用者</button><button class="switch" onclick="myPinOpen()">改 PIN</button><button class="switch" onclick="refresh(true)" aria-label="重新整理">↻</button></div>
     <div class="date" id="today"></div>
   </header>
   <nav>
@@ -222,7 +227,7 @@
 
 <div id="admin" class="hide">
   <header>
-    <div class="who"><span id="adWho">管理者</span><button class="switch" onclick="logout()">切換使用者</button><button class="switch" onclick="refresh(true)" aria-label="重新整理">↻</button></div>
+    <div class="who"><span id="adWho">管理者</span><button class="switch" onclick="logout()">切換使用者</button><button class="switch" id="adPinBtn" onclick="myPinOpen()">改 PIN</button><button class="switch" onclick="refresh(true)" aria-label="重新整理">↻</button></div>
     <div class="date" id="adToday"></div>
   </header>
   <nav class="adnav">
@@ -237,12 +242,21 @@
   <main><div class="msg" id="adMsg"></div><div id="adBody"><div class="empty">載入中…</div></div></main>
 </div>
 
+<div id="pinBox" class="hide"><div class="card">
+  <h3 class="ah">更改我的 PIN</h3>
+  <input id="mpA" type="password" inputmode="numeric" autocomplete="new-password">
+  <input id="mpB" type="password" inputmode="numeric" autocomplete="new-password">
+  <button class="big in" onclick="myPinSave()">更改</button>
+  <button class="big out" onclick="myPinClose()">取消</button>
+  <div class="msg" id="mPin"></div>
+  <small>登入時輸入姓名和 PIN。PIN 可以和別人一樣，但不要用 1234、0000 這類好猜的號碼，也不要用提款卡密碼（管理者看得到大家的 PIN）</small>
+</div></div>
 <div id="toast"></div>
 <div id="lightbox" class="hide" onclick="closePhoto()"><img id="lbImg" alt=""><div id="lbMsg"></div></div>
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=14"></script>
-<script src="admin.js?v=9"></script>
+<script src="app.js?v=15"></script>
+<script src="admin.js?v=10"></script>
 <script src="cash.js?v=1"></script>
 <script src="push.js?v=3"></script>
 </body>

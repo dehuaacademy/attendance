@@ -22,6 +22,7 @@ function adminStart(r) {
   busy = false;
   ROLE = r.role === 'viewer' ? 'viewer' : 'admin';
   HOST = { body: 'adBody', msg: 'adMsg' }; adTab = ROLE !== 'viewer' ? 'people' : (r.title === '執行長' || r.title === '財務') ? 'cash' : 'log';
+  $('adPinBtn').classList.toggle('hide', r.title === '前賢');
   $('adWho').innerHTML = esc(r.name) + (ROLE === 'viewer' ? '<span class="role">' + esc(r.title || '唯讀') + '</span>' : '');
   $('at-log').textContent = ROLE === 'viewer' ? '回報' : '紀錄';
   AD_TABS.forEach(function (x) {
@@ -164,7 +165,9 @@ var pinArm = '';
 function adNewPin(name, btn) {
   if (pinArm !== name) { pinArm = name; btn.textContent = '確定換？'; btn.classList.add('warn'); return; }
   pinArm = '';
-  adDo('setPin', { name: name }, function (r) { return r.name + ' 的新 PIN：' + r.pin + '（舊的已失效）'; });
+  var want = prompt('幫「' + name + '」設定新的 4 位數 PIN\n（空白＝自動產生）', '');
+  if (want === null) { adRender(); return; }
+  adDo('setPin', { name: name, pin: want.trim() }, function (r) { return r.name + ' 的新 PIN：' + r.pin + '（舊的已失效，登入時輸入姓名和這組 PIN）'; });
 }
 function adRole(name, role) {
   adDo('setRole', { name: name, role: role }, name + ' 已改為' + role + (role === '組長' ? '（下次打開 App 會多一個「管理」分頁）' : role === '前賢' ? '（只能看回報、排班、公告、零用金）' : role === '執行長' ? '（唯讀出勤＋核准大額零用金）' : role === '財務' ? '（唯讀出勤＋撥款、核對零用金）' : ''));
@@ -175,7 +178,7 @@ function adDevice(name) {
   busy = true; busySince = Date.now(); adMsg('設定中…');
   adm('device', { name: name }).then(function (r) {
     busy = false;
-    store('dh_pin', r.pin); CODE = r.pin; AD = null;
+    setCode(r.name, r.pin); AD = null;
     load().then(function (ok) {
       if (ok === true) { show('app'); tab('clock'); msg('mClock', '這支手機已設定為 ' + r.name + '，可以加到主畫面了', 'ok'); }
       else toast('這支手機已設定為 ' + r.name);
@@ -320,7 +323,7 @@ function adAdminPin() {
   var a = $('apPin').value.trim(), b2 = $('apPin2').value.trim();
   if (!/^\d{6}$/.test(a)) { adMsg('請輸入 6 位數字', true); return; }
   if (a !== b2) { adMsg('兩次輸入不一樣', true); return; }
-  adDo('adminPin', { pin: a }, function (r) { store('dh_pin', r.pin); CODE = r.pin; return '管理者 PIN 已更換，請記好新的 PIN'; });
+  adDo('adminPin', { pin: a }, function (r) { setCode(r.name, r.pin); return '管理者 PIN 已更換，請記好新的 PIN'; });
 }
 function adSaveSettings() {
   var v = {};
