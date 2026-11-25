@@ -68,7 +68,7 @@ function load() {
     if (!$('rDate').value) $('rDate').value = r.today;
     $('sIn').textContent = r.clock['簽到'] || '—';
     $('sOut').textContent = r.clock['簽退'] || '—';
-    renderSchedule(r.schedule, r.today);
+    renderSchedule(r.schedule, r.today, r.days || 60);
     return true;
   }).catch(function (e) {
     if (/PIN/.test(e.message)) logout('PIN 錯誤或已停用，請重新輸入');
@@ -78,24 +78,38 @@ function load() {
   });
 }
 
-function renderSchedule(list, today) {
-  var box = $('schedList');
-  if (!list.length) { box.innerHTML = '<div class="empty">未來兩週還沒有排班</div>'; return; }
-  var html = '', cur = '';
-  list.forEach(function (s) {
-    if (s.date !== cur) {
-      if (cur) html += '</div>';
-      cur = s.date;
-      var d = new Date(s.date + 'T00:00:00');
-      html += '<div class="day"><h3>' + (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）'
-           + (s.date === today ? '<small>今天</small>' : '') + '</h3>';
-    }
-    html += '<div class="shift' + (s.name === NAME ? ' me' : '') + '"><span>' + esc(s.name)
-         + (s.note ? '<span class="note">' + esc(s.note) + '</span>' : '') + '</span><span>'
-         + esc(s.start) + (s.end ? '–' + esc(s.end) : '') + '</span></div>';
-  });
-  box.innerHTML = html + '</div>';
+// 班表：今天起 N 天，每天一列；點按鈕登記／取消自己的班
+function renderSchedule(list, today, days) {
+  var by = {};
+  list.forEach(function (s) { (by[s.date] = by[s.date] || []).push(s); });
+  var base = new Date(today + 'T00:00:00'), html = '', month = -1;
+  for (var i = 0; i < days; i++) {
+    var d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i);
+    var ds = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    var people = by[ds] || [], mine = people.some(function (s) { return s.name === NAME; });
+    if (d.getMonth() !== month) { month = d.getMonth(); html += '<div class="mon">' + d.getFullYear() + ' 年 ' + (month + 1) + ' 月</div>'; }
+    var tags = people.map(function (s) {
+      var t = (s.start ? ' ' + esc(s.start) + (s.end ? '–' + esc(s.end) : '') : '') + (s.note ? '・' + esc(s.note) : '');
+      return '<span class="who' + (s.name === NAME ? ' me' : '') + '">' + esc(s.name) + t + '</span>';
+    }).join('');
+    if (!people.length) tags = i > 0 && i <= 7 ? '<span class="gap">缺人</span>' : '<span class="none">尚無人</span>';
+    html += '<div class="row' + (d.getDay() === 0 || d.getDay() === 6 ? ' wk' : '') + '">'
+         + '<div class="dt"><b>' + (d.getMonth() + 1) + '/' + d.getDate() + '</b><small>' + (i === 0 ? '今天' : '週' + WEEK[d.getDay()]) + '</small></div>'
+         + '<div class="ppl">' + tags + '</div>'
+         + '<button class="op' + (mine ? ' cancel' : '') + '" onclick="shiftOp(\'' + ds + '\',\'' + (mine ? 'cancel' : 'add') + '\',this)">'
+         + (mine ? '取消' : '我要排') + '</button></div>';
+  }
+  $('schedList').innerHTML = html;
 }
+
+function shiftOp(date, op, btn) {
+  if (busy) return;
+  busy = true; btn.disabled = true; btn.textContent = '…';
+  apiPost({ action: 'shift', u: CODE, op: op, date: date })
+    .then(function () { busy = false; return load(); })
+    .catch(function (e) { busy = false; btn.disabled = false; btn.textContent = op === 'add' ? '我要排' : '取消'; alertMsg(e.message); });
+}
+function alertMsg(t) { var m = $('mSched'); m.textContent = t; m.className = 'msg err'; setTimeout(function () { m.textContent = ''; }, 4000); }
 function esc(s) { return String(s || '').replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
 
 // ===== 打卡 =====
