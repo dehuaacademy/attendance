@@ -2,6 +2,7 @@
 var API = 'PASTE_APPS_SCRIPT_EXEC_URL';
 var MAX_PHOTOS = 3, PHOTO_MAX_SIDE = 1600, PHOTO_QUALITY = 0.7;
 var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+var AREAS = ['北一區', '北二區', '桃竹苗', '中區', '南區'], STAY_ROWS = 10;
 
 // ===== 身分：共用連結，第一次輸入個人 PIN 後記在這支手機上 =====
 function store(k, v) {
@@ -17,7 +18,7 @@ function $(id) { return document.getElementById(id); }
 function pad(n) { return (n < 10 ? '0' : '') + n; }
 function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 function msg(id, text, cls) { var m = $(id); m.textContent = text; m.className = 'msg ' + (cls || ''); }
-function lock(on) { busy = on; ['btnIn', 'btnOut', 'btnSend'].forEach(function (b) { $(b).disabled = on; }); }
+function lock(on) { busy = on; ['btnIn', 'btnOut', 'btnSend', 'btnStay'].forEach(function (b) { $(b).disabled = on; }); }
 function invalid(text) { $('app').classList.add('hide'); $('invalidText').textContent = text; $('invalid').classList.remove('hide'); }
 function show(id) { ['app', 'login', 'invalid'].forEach(function (x) { $(x).classList.toggle('hide', x !== id); }); }
 
@@ -66,6 +67,8 @@ function load() {
     $('who').textContent = r.name;
     $('today').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
     if (!$('rDate').value) $('rDate').value = r.today;
+    if (r.areas && r.areas.join() !== AREAS.join()) { AREAS = r.areas; buildStay(true); }
+    $('stayDate').textContent = r.today.slice(5).replace('-', '/') + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
     $('sIn').textContent = r.clock['簽到'] || '—';
     $('sOut').textContent = r.clock['簽退'] || '—';
     renderSchedule(r.schedule, r.today, r.days || 60);
@@ -183,7 +186,47 @@ document.addEventListener('change', function (e) {
   }).catch(function (err) { msg('mReport', err.message, 'err'); });
 });
 
-// ===== 回報 =====
+// ===== 回報：事務回報／住廟回報切換 =====
+function seg(t) {
+  $('rWork').style.display = t === 'work' ? '' : 'none';
+  $('rStay').style.display = t === 'stay' ? '' : 'none';
+  $('seg-work').classList.toggle('on', t === 'work');
+  $('seg-stay').classList.toggle('on', t === 'stay');
+}
+
+// 住廟回報：10 列，左邊選區域、右邊填姓名；空白列不送出。日期＝送出當天
+function buildStay(keep) {
+  var old = keep ? stayValues(true) : [];
+  var opts = '<option value="">區域</option>' + AREAS.map(function (a) { return '<option>' + esc(a) + '</option>'; }).join('');
+  var html = '';
+  for (var i = 0; i < STAY_ROWS; i++) {
+    html += '<div class="srow"><span class="n">' + (i + 1) + '</span><select id="sa' + i + '">' + opts + '</select>'
+         + '<input id="sn' + i + '" placeholder="姓名" maxlength="30"></div>';
+  }
+  $('stayRows').innerHTML = html;
+  old.forEach(function (r, i) { if (i < STAY_ROWS) { $('sa' + i).value = r.area; $('sn' + i).value = r.name; } });
+}
+function stayValues(all) {
+  var out = [];
+  for (var i = 0; i < STAY_ROWS; i++) {
+    var r = { area: $('sa' + i).value, name: $('sn' + i).value.trim() };
+    if (all || r.name || r.area) out.push(r);
+  }
+  return out;
+}
+function sendStay() {
+  if (busy) return;
+  var rows = stayValues(false);
+  var bad = rows.filter(function (r) { return !r.name || !r.area; });
+  if (!rows.length) { msg('mStay', '請至少填一位', 'err'); return; }
+  if (bad.length) { msg('mStay', '有列只填了區域或姓名，請補齊或清空', 'err'); return; }
+  lock(true); msg('mStay', '送出中…');
+  apiPost({ action: 'stay', u: CODE, rows: rows })
+    .then(function (r) { lock(false); buildStay(false); msg('mStay', '已送出 ' + r.time + '（' + r.count + ' 位）', 'ok'); })
+    .catch(function (e) { lock(false); msg('mStay', (e.message === 'Failed to fetch' ? '網路異常' : e.message) + '，內容還在，請再送一次', 'err'); });
+}
+
+// ===== 事務回報 =====
 function send() {
   if (busy) return;
   var text = $('rText').value.trim();
@@ -206,5 +249,6 @@ if (!/^https?:\/\//.test(API)) invalid('系統尚未設定完成');
 else {
   $('rDate').value = todayStr();
   renderPhotos();
+  buildStay(false);
   if (CODE) { show('app'); load(); } else show('login');
 }

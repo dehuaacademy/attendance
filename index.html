@@ -68,6 +68,15 @@
   .op{flex:none;border:0;border-radius:16px;padding:6px 12px;font:inherit;font-size:14px;background:var(--navy);color:#fff}
   .op.cancel{background:#fff;color:var(--navy);border:1px solid var(--navy)}
   .op:disabled{opacity:.5}
+  .seg{display:flex;background:#fff;border-radius:12px;padding:4px;margin-bottom:16px}
+  .seg button{flex:1;border:0;background:none;padding:10px;border-radius:9px;font:inherit;font-size:16px;color:var(--navy)}
+  .seg button.on{background:var(--navy);color:#fff;font-weight:700}
+  .sub{font-weight:400;opacity:.6;margin-left:6px}
+  .srow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+  .srow .n{width:20px;font-size:13px;opacity:.5;text-align:right;flex:none}
+  .srow select{width:38%;margin:0;padding:10px 6px}
+  .srow input{flex:1;margin:0;padding:10px}
+  #btnStay{margin-top:8px}
   footer{text-align:center;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
   footer img{width:32px;height:auto}
   .invalid{padding:60px 20px;text-align:center;font-size:18px;flex:1}
@@ -117,7 +126,14 @@
     </section>
 
     <section id="report" class="hide">
-      <div class="card">
+      <div class="seg"><button id="seg-work" class="on" onclick="seg('work')">事務回報</button><button id="seg-stay" onclick="seg('stay')">住廟回報</button></div>
+      <div class="card" id="rStay" style="display:none">
+        <label>今天住廟人員<span class="sub" id="stayDate"></span></label>
+        <div id="stayRows"></div>
+        <button class="big send" id="btnStay" onclick="sendStay()">送出住廟回報</button>
+        <div class="msg" id="mStay"></div>
+      </div>
+      <div class="card" id="rWork">
         <label for="rKind">類型</label>
         <select id="rKind"><option>日報</option><option>異常回報</option><option>其他</option></select>
         <label for="rDate">日期</label>
@@ -141,6 +157,6 @@
 
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
