@@ -57,15 +57,32 @@
   footer img{width:32px;height:auto}
   .invalid{padding:60px 20px;text-align:center;font-size:18px;flex:1}
   .invalid small{display:block;margin-top:8px;font-size:14px;opacity:.7}
+  .login{flex:1;padding:60px 20px 20px;max-width:480px;width:100%;margin:0 auto}
+  .login h2{font-size:22px;text-align:center;margin-bottom:24px}
+  .login input{font-size:28px;letter-spacing:12px;text-align:center}
+  .login input::placeholder{letter-spacing:2px;font-size:18px}
+  .login small{display:block;text-align:center;font-size:13px;opacity:.6;margin-top:12px}
+  .switch{float:right;margin-top:4px;background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:14px;padding:3px 10px;font:inherit;font-size:12px;font-weight:400}
 </style>
 </head>
 <body>
 
-<div id="invalid" class="invalid hide"><span id="invalidText">連結無效</span><small>請向管理者索取個人專屬連結</small></div>
+<div id="invalid" class="invalid hide"><span id="invalidText">系統尚未設定完成</span><small>請聯絡管理者</small></div>
+
+<div id="login" class="login hide">
+  <div class="card">
+    <h2>德化 廟務打卡</h2>
+    <label for="pin">請輸入個人 PIN 碼</label>
+    <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="4 位數字">
+    <button class="big in" id="btnLogin" onclick="login()">進入</button>
+    <div class="msg" id="mLogin"></div>
+    <small>第一次輸入後，這支手機會記住你，之後不用再輸入</small>
+  </div>
+</div>
 
 <div id="app" class="hide">
   <header>
-    <div class="who" id="who">載入中…</div>
+    <div class="who"><span id="who">載入中…</span><button class="switch" onclick="logout()">切換使用者</button></div>
     <div class="date" id="today"></div>
   </header>
   <nav>
@@ -108,6 +125,6 @@
 
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

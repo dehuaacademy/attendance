@@ -3,11 +3,12 @@ var API = 'PASTE_APPS_SCRIPT_EXEC_URL';
 var MAX_PHOTOS = 3, PHOTO_MAX_SIDE = 1600, PHOTO_QUALITY = 0.7;
 var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 
-// ===== 身分：第一次用專屬連結（?u=代碼）打開後記在手機上，之後從主畫面圖示開也認得 =====
-function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
-var qs = new URLSearchParams(location.search);
-if (qs.get('u')) store('dh_u', qs.get('u'));
-var CODE = qs.get('u') || store('dh_u');
+// ===== 身分：共用連結，第一次輸入個人 PIN 後記在這支手機上 =====
+function store(k, v) {
+  try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); }
+  catch (e) { return null; }
+}
+var CODE = store('dh_pin');
 var NAME = '';
 var photos = []; // 已壓縮的 dataURL
 var busy = false;
@@ -18,6 +19,24 @@ function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.g
 function msg(id, text, cls) { var m = $(id); m.textContent = text; m.className = 'msg ' + (cls || ''); }
 function lock(on) { busy = on; ['btnIn', 'btnOut', 'btnSend'].forEach(function (b) { $(b).disabled = on; }); }
 function invalid(text) { $('app').classList.add('hide'); $('invalidText').textContent = text; $('invalid').classList.remove('hide'); }
+function show(id) { ['app', 'login', 'invalid'].forEach(function (x) { $(x).classList.toggle('hide', x !== id); }); }
+
+function login() {
+  var pin = $('pin').value.trim();
+  if (!/^\d{4}$/.test(pin)) { msg('mLogin', '請輸入 4 位數字', 'err'); return; }
+  $('btnLogin').disabled = true; msg('mLogin', '確認中…');
+  CODE = pin;
+  load().then(function (ok) {
+    $('btnLogin').disabled = false;
+    if (ok) { store('dh_pin', pin); $('pin').value = ''; msg('mLogin', ''); show('app'); }
+  });
+}
+function logout(text) {
+  store('dh_pin', null); CODE = null; NAME = '';
+  $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
+  show('login'); msg('mLogin', text || '', text ? 'err' : '');
+  $('pin').focus();
+}
 
 function tab(t) {
   ['clock', 'report', 'schedule'].forEach(function (x) {
@@ -50,9 +69,12 @@ function load() {
     $('sIn').textContent = r.clock['簽到'] || '—';
     $('sOut').textContent = r.clock['簽退'] || '—';
     renderSchedule(r.schedule, r.today);
+    return true;
   }).catch(function (e) {
-    if (/連結無效/.test(e.message)) invalid('連結無效');
-    else { $('who').textContent = '連線失敗'; msg('mClock', '無法連線，請確認網路後重新整理', 'err'); }
+    if (/PIN/.test(e.message)) logout('PIN 錯誤或已停用，請重新輸入');
+    else if (!$('app').classList.contains('hide')) { $('who').textContent = '連線失敗'; msg('mClock', '無法連線，請確認網路後重新整理', 'err'); }
+    else msg('mLogin', '無法連線，請確認網路後再試', 'err');
+    return false;
   });
 }
 
@@ -165,11 +187,10 @@ function send() {
 }
 
 // ===== 啟動 =====
-if (!CODE) invalid('連結無效');
-else if (!/^https?:\/\//.test(API)) invalid('系統尚未設定完成');
+document.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.id === 'pin') login(); });
+if (!/^https?:\/\//.test(API)) invalid('系統尚未設定完成');
 else {
-  $('app').classList.remove('hide');
   $('rDate').value = todayStr();
   renderPhotos();
-  load();
+  if (CODE) { show('app'); load(); } else show('login');
 }
