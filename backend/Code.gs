@@ -21,7 +21,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.6';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.7';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -76,7 +76,7 @@ var _cfg = null;
 // App 裡任何寫入都會立刻清掉相關快取；直接改試算表會由 onEdit 清掉全部快取
 var CACHE_TTL = 600;
 var CK = { users: 'c_users', settings: 'c_settings', shifts: 'c_shifts_', news: 'c_news_', clock: 'c_clock_',
-           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev' };   // 結尾是 _ 的會加上今天日期
+           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos' };   // 結尾是 _ 的會加上今天日期
 var _users = null, _bustKeys = [];
 function cache_(key, loader) {
   var c = CacheService.getScriptCache(), v = null;
@@ -158,6 +158,7 @@ function doPost(e) {
     if (body.action === 'stay')   return stay_(body);
     if (body.action === 'admin')  return admin_(body);
     if (body.action === 'push')   return push_(body);
+    if (body.action === 'photo')  return photo_(body);
     throw new Error('未知的操作');
   });
 }
@@ -305,7 +306,7 @@ function report_(b) {
       links[i] = folder.createFile(blob).getUrl();
     });
   }
-  bust_(['reports']);
+  bust_(['reports', 'photos']);
   sheet_('report').appendRow(["'" + fmt_(now, 'yyyy-MM-dd'), "'" + fmt_(now, 'HH:mm:ss'), "'" + b.date, name, b.kind,
                               text, links[0], links[1], links[2], now]);
 
@@ -721,6 +722,30 @@ function push_(b) {
     if (!r.sent) throw new Error('已登記，但測試通知沒送出：' + (r.error || '請稍後再試'));
   }
   return { registered: true };
+}
+
+// 回報照片：在 App 裡直接看（照片仍是私人檔案，只透過後台、憑 PIN 讀取）
+// 只能讀「回報」分頁裡出現過的照片，不能拿來讀雲端硬碟其他檔案
+function photoIds_() {
+  return cache_(CK.photos, function () {
+    var sh = sheet_('report'), last = sh.getLastRow(), ids = {};
+    if (last < 2) return ids;
+    var st = Math.max(2, last - 1000);
+    sh.getRange(st, 7, last - st + 1, 3).getDisplayValues().forEach(function (r) {
+      r.forEach(function (u) { var m = String(u).match(/\/d\/([-\w]{20,})/); if (m) ids[m[1]] = 1; });
+    });
+    return ids;
+  });
+}
+function photo_(b) {
+  var who = auth_(b.u);
+  if (['管理者', '組長', '前賢'].indexOf(who.role) < 0) throw new Error('沒有權限看照片');
+  var id = String(b.id || '');
+  if (!/^[-\w]{20,}$/.test(id) || !photoIds_()[id]) throw new Error('找不到這張照片');
+  var blob = DriveApp.getFileById(id).getBlob();
+  var bytes = blob.getBytes();
+  if (bytes.length > 4000000) throw new Error('照片太大，請到雲端硬碟查看');
+  return { mime: blob.getContentType() || 'image/jpeg', data: Utilities.base64Encode(bytes) };
 }
 
 // 最近的公告（新的在前）
