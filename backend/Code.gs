@@ -21,7 +21,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.4';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.5';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -120,7 +120,8 @@ function doPost(e) {
 
 function handle_(fn) {
   var out;
-  try { out = fn(); out.ok = true; }
+  // 先強制寫入試算表：寫入被拒（例如資料驗證不符）時會在這裡變成錯誤，不會假裝成功
+  try { out = fn(); SpreadsheetApp.flush(); out.ok = true; }
   catch (err) { out = { ok: false, error: String(err.message || err) }; }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -757,6 +758,10 @@ function setup() {
     h.forEach(function (name, i) { if (!cur[i]) sh.getRange(1, i + 1).setValue(name); });   // 補上缺的欄位名稱
     sh.getRange(1, 1, 1, h.length).setFontWeight('bold').setBackground('#1C264D').setFontColor('#FFFFFF');
   });
+  // 人員分頁「角色」欄的下拉選單要包含所有角色，否則寫入組長／前賢會被拒
+  var uSh = sheet_('users');
+  uSh.getRange(2, 4, Math.max(uSh.getMaxRows() - 1, 1), 1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(['員工', '組長', '前賢', '管理者'], true).setAllowInvalid(false).build());
   var ss = sheet_('settings'), have = {};
   if (ss.getLastRow() > 1) ss.getRange(2, 1, ss.getLastRow() - 1, 1).getDisplayValues().forEach(function (r) { have[r[0]] = true; });
   SETTINGS.forEach(function (x) { if (!have[x[0]]) ss.appendRow([x[0], "'" + x[1], x[2]]); });
