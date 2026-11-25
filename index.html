@@ -77,6 +77,33 @@
   .srow select{width:38%;margin:0;padding:10px 6px}
   .srow input{flex:1;margin:0;padding:10px}
   #btnStay{margin-top:8px}
+  #admin{flex:1}
+  .adnav button{font-size:15px;padding:12px 4px}
+  .ah{font-size:16px;margin-bottom:12px}
+  .prow{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-bottom:1px solid #eee}
+  .prow.off{opacity:.5}
+  .pn{display:flex;justify-content:space-between;align-items:baseline}
+  .pn span{font-size:14px;opacity:.7}
+  .pb{display:flex;gap:6px;flex-wrap:wrap}
+  .sb{border:1px solid var(--navy);background:#fff;color:var(--navy);border-radius:16px;padding:6px 12px;font:inherit;font-size:14px}
+  .sb.pri{background:var(--navy);color:#fff}
+  .sb.warn{background:#c62828;border-color:#c62828;color:#fff}
+  .lrow{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #eee;font-size:15px}
+  .lrow span:first-of-type{flex:1}
+  .lrow small{opacity:.6;font-size:12px}
+  .ok{color:#2e7d32;font-size:13px}.bad{color:#c62828;font-size:13px}.mid{color:#b26a00;font-size:13px}
+  .empty.gap{color:#c62828;opacity:1}
+  .who .x{margin-left:4px;color:#c62828;font-weight:700;cursor:pointer}
+  .sform{background:#f7f7f7;border-radius:10px;padding:12px;margin:4px 0 10px}
+  .sform input,.sform select{margin-bottom:8px}
+  .sform small,.card small{display:block;font-size:12px;opacity:.6;margin-top:6px}
+  .srow2{display:flex;gap:6px}.srow2 input,.srow2 select{flex:1;min-width:0}
+  .rep{padding:10px 0;border-bottom:1px solid #eee}
+  .rep small{display:inline;margin-left:6px}
+  .rep p{margin:6px 0;font-size:15px;white-space:pre-wrap}
+  .kind{font-size:12px;background:#eee;border-radius:10px;padding:2px 8px}.kind.bad{background:#fde3e3}
+  .pl a{margin-right:12px;font-size:14px;color:var(--navy)}
+  small.note{margin:-10px 0 14px}
   footer{text-align:center;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
   footer img{width:32px;height:auto}
   .invalid{padding:60px 20px;text-align:center;font-size:18px;flex:1}
@@ -155,8 +182,24 @@
   </main>
 </div>
 
+<div id="admin" class="hide">
+  <header>
+    <div class="who"><span>管理者</span><button class="switch" onclick="logout()">切換使用者</button></div>
+    <div class="date" id="adToday"></div>
+  </header>
+  <nav class="adnav">
+    <button id="at-people" class="on" onclick="adTabGo('people')">人員</button>
+    <button id="at-today" onclick="adTabGo('today')">今日</button>
+    <button id="at-sched" onclick="adTabGo('sched')">排班</button>
+    <button id="at-log" onclick="adTabGo('log')">紀錄</button>
+    <button id="at-settings" onclick="adTabGo('settings')">設定</button>
+  </nav>
+  <main><div class="msg" id="adMsg"></div><div id="adBody"><div class="empty">載入中…</div></div></main>
+</div>
+
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
+<script src="admin.js?v=1"></script>
 </body>
 </html>

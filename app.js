@@ -20,22 +20,22 @@ function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.g
 function msg(id, text, cls) { var m = $(id); m.textContent = text; m.className = 'msg ' + (cls || ''); }
 function lock(on) { busy = on; ['btnIn', 'btnOut', 'btnSend', 'btnStay'].forEach(function (b) { $(b).disabled = on; }); }
 function invalid(text) { $('app').classList.add('hide'); $('invalidText').textContent = text; $('invalid').classList.remove('hide'); }
-function show(id) { ['app', 'login', 'invalid'].forEach(function (x) { $(x).classList.toggle('hide', x !== id); }); }
+function show(id) { ['app', 'login', 'invalid', 'admin'].forEach(function (x) { $(x).classList.toggle('hide', x !== id); }); }
 
 function login() {
   var pin = $('pin').value.trim();
-  if (!/^\d{4}$/.test(pin)) { msg('mLogin', '請輸入 4 位數字', 'err'); return; }
+  if (!/^\d{4}$|^\d{6}$/.test(pin)) { msg('mLogin', '請輸入 PIN 碼', 'err'); return; }
   $('btnLogin').disabled = true; msg('mLogin', '確認中…');
   CODE = pin;
   load().then(function (ok) {
     $('btnLogin').disabled = false;
-    if (ok) { store('dh_pin', pin); $('pin').value = ''; msg('mLogin', ''); show('app'); }
+    if (ok) { store('dh_pin', pin); $('pin').value = ''; msg('mLogin', ''); if (ok !== 'admin') show('app'); }
   });
 }
 function logout(text) {
   store('dh_pin', null); CODE = null; NAME = '';
   $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
-  show('login'); msg('mLogin', text || '', text ? 'err' : '');
+  AD = null; show('login'); msg('mLogin', text || '', text ? 'err' : '');
   $('pin').focus();
 }
 
@@ -63,6 +63,7 @@ function parse(r) {
 // ===== 載入狀態與班表 =====
 function load() {
   return apiGet({ action: 'status', u: CODE }).then(function (r) {
+    if (r.role === 'admin') { adminStart(r); return 'admin'; }
     NAME = r.name;
     $('who').textContent = r.name;
     $('today').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
@@ -251,4 +252,6 @@ else {
   renderPhotos();
   buildStay(false);
   if (CODE) { show('app'); load(); } else show('login');
+  // 管理者 PIN 是 6 位數
+  $('pin').maxLength = 6; $('pin').placeholder = 'PIN 碼';
 }
