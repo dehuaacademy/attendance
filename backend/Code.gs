@@ -1,12 +1,13 @@
 /**
- * 德化廟務 App（德化宮 廟務總管小組）｜簽到退＋回報＋自選排班＋管理者／組長介面＋App 推播與公告 後台（v5.3）
+ * 德化廟務 App（德化宮 廟務總管小組）｜簽到退＋回報＋自選排班＋管理者／組長／前賢介面＋App 推播與公告 後台（v5.3）
  * 這份程式碼放在公開的 GitHub（dehuaacademy/attendance/backend），不可寫入任何密碼或頻道名稱。
  * 更新方式：推到 GitHub 後，由獨立的「德化更新器」自動安裝並更新部署（見維護說明）。
  * 綁定在試算表「德化 廟務打卡紀錄」上，部署成網頁應用程式，只回傳資料（JSON），不負責畫面。
  * 前台網頁放在 GitHub Pages：https://dehuaacademy.github.io/attendance/
  *
  * 試算表分頁：
- *   人員     PIN｜姓名｜啟用（是／否）｜角色（員工／組長／管理者） ← App 管理介面或這裡都能改
+ *   人員     PIN｜姓名｜啟用（是／否）｜角色（員工／組長／前賢／管理者）
+ *            前賢＝唯讀帳號（看回報、排班、公告，收公告與異常回報通知），可多人共用一組 PIN ← App 管理介面或這裡都能改
  *   設定     項目｜值｜說明  ← 區域、定位範圍、可排班天數、推播開關；App 管理介面可改
  *   操作紀錄 管理者在 App 上的每一個操作
  *   排班表   員工在 App 自選日期登記／取消（系統寫入）；管理者也可以直接加列或改狀態
@@ -20,7 +21,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.3';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.4';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -129,6 +130,7 @@ function status_(code) {
   var who = auth_(code);
   var today = fmt_(new Date(), 'yyyy-MM-dd');
   if (who.role === '管理者') return { name: who.name, role: 'admin', today: today };
+  if (who.role === '前賢') return { name: who.name, role: 'viewer', today: today };
   var name = who.name;
   var res = { name: name, leader: who.role === '組長', today: today, clock: { 簽到: null, 簽退: null }, schedule: [] };
 
@@ -255,7 +257,7 @@ function report_(b) {
 
   if (cfg_().nReport && CONFIG.NOTIFY_REPORT_KINDS.indexOf(b.kind) >= 0) {
     notify_('🔴 ' + name + ' ' + b.kind,
-            (text ? text.slice(0, 200) : '（無文字）') + (photos.length ? '\n附照片 ' + photos.length + ' 張' : ''), 4);
+            (text ? text.slice(0, 200) : '（無文字）') + (photos.length ? '\n附照片 ' + photos.length + ' 張' : ''), 4, ['管理者', '組長', '前賢']);
   }
   return { time: fmt_(now, 'HH:mm'), photos: photos.length };
 }
@@ -350,21 +352,24 @@ function stay_(b) {
 function admin_(b) {
   var me = auth_(b.u);
   var LEADER_OPS = ['overview', 'shift', 'clockFix'];   // 組長可以做的管理操作
-  if (me.role !== '管理者' && !(me.role === '組長' && LEADER_OPS.indexOf(b.op) >= 0)) throw new Error('沒有管理權限');
+  var VIEWER_OPS = ['overview'];                        // 前賢只能看
+  var allowed = me.role === '管理者' || (me.role === '組長' && LEADER_OPS.indexOf(b.op) >= 0) || (me.role === '前賢' && VIEWER_OPS.indexOf(b.op) >= 0);
+  if (!allowed) throw new Error('沒有管理權限');
   var op = b.op, today = day_(0), r;
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    if (op === 'overview') return overview_(today, me.role === '管理者');
+    if (op === 'overview') return overview_(today, me.role === '管理者' ? 'admin' : me.role === '組長' ? 'leader' : 'viewer');
 
     if (op === 'addUser') {
       var name = String(b.name || '').trim();
       if (!name || name.length > 20) throw new Error('請輸入姓名');
       if (users_().some(function (u) { return u.name === name; })) throw new Error('已經有「' + name + '」了');
       var pin = newPin_(b.pin);
-      sheet_('users').appendRow(["'" + pin, name, '是', '員工']);
-      log_(me.name, '新增人員', name);
-      return { name: name, pin: pin };
+      var nrole = b.role === '前賢' ? '前賢' : '員工';
+      sheet_('users').appendRow(["'" + pin, name, '是', nrole]);
+      log_(me.name, '新增人員', name + (nrole === '前賢' ? '（前賢）' : ''));
+      return { name: name, pin: pin, role: nrole };
     }
 
     var target = null;
@@ -377,9 +382,9 @@ function admin_(b) {
 
     if (op === 'setRole') {
       if (target.role === '管理者') throw new Error('管理者帳號不能改角色');
-      var role = b.role === '組長' ? '組長' : '員工';
+      var role = ['組長', '前賢'].indexOf(b.role) >= 0 ? b.role : '員工';
       sheet_('users').getRange(target.row, 4).setValue(role);
-      log_(me.name, role === '組長' ? '設為組長' : '取消組長', target.name);
+      log_(me.name, '角色改為' + role, target.name);
       return { name: target.name, role: role };
     }
     if (op === 'adminPin') {
@@ -413,7 +418,7 @@ function admin_(b) {
     }
 
     if (op === 'shift') {
-      if (!target || target.role === '管理者') throw new Error('請選擇員工');
+      if (!target || (target.role !== '員工' && target.role !== '組長')) throw new Error('請選擇員工');
       var date = normDate_(b.date);
       if (!date || date < today || date > day_(cfg_().days - 1)) throw new Error('日期超出可排班範圍');
       var sh = sheet_('schedule');
@@ -435,7 +440,7 @@ function admin_(b) {
     }
 
     if (op === 'clockFix') {
-      if (!target || target.role === '管理者') throw new Error('請選擇員工');
+      if (!target || (target.role !== '員工' && target.role !== '組長')) throw new Error('請選擇員工');
       var d = normDate_(b.date), t = hhmmIn_(b.time);
       if (!d || d > today) throw new Error('日期錯誤');
       if (!t) throw new Error('請輸入時間');
@@ -473,7 +478,7 @@ function admin_(b) {
       var title = String(b.title || '').trim(), body = String(b.body || '').trim();
       if (!title || title.length > 40) throw new Error('標題請填 1–40 字');
       if (body.length > 1000) throw new Error('內容最多 1000 字');
-      var res = fcm_(devices_(['員工', '組長']), '📢 ' + title, body || title, 'news');
+      var res = fcm_(devices_(['員工', '組長', '前賢']), '📢 ' + title, body || title, 'news');
       sheet_('news').appendRow(["'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm'), me.name, title, body, res.sent]);
       log_(me.name, '發公告', title + '（送達 ' + res.sent + ' 支手機）');
       return { sent: res.sent, error: res.error || '' };
@@ -482,8 +487,8 @@ function admin_(b) {
   } finally { lock.releaseLock(); }
 }
 
-function overview_(today, full) {
-  var c = cfg_();
+function overview_(today, mode) {
+  var c = cfg_(), full = mode === 'admin', viewer = mode === 'viewer';
   var users = users_().map(function (u) { return { name: u.name, pin: full && u.role !== '管理者' ? u.pin : '', enabled: u.enabled, role: u.role }; });
 
   var clock = [], ck = sheet_('clock'), n = ck.getLastRow() - 1;
@@ -512,10 +517,10 @@ function overview_(today, full) {
   });
 
   return {
-    today: today, days: c.days, users: users, clock: clock,
+    today: today, days: c.days, users: viewer ? [] : users, clock: viewer ? [] : clock,
     schedule: shifts_(today, day_(c.days - 1)).map(function (s) { return { date: s.date, name: s.name, start: s.start, end: s.end, note: s.note }; }),
     reports: reports, stays: stays, settings: full ? settings : {},
-    news: news_(CONFIG.NEWS_MAX), devices: deviceCount_(), role: full ? 'admin' : 'leader'
+    news: news_(CONFIG.NEWS_MAX), devices: viewer ? {} : deviceCount_(), role: mode
   };
 }
 
@@ -541,12 +546,13 @@ function log_(who, action, detail) {
 }
 
 // ===== 推播通知 =====
-// audience：'admin'（預設，只推管理者）、'all'（管理者＋同仁）
+// audience：'admin'（預設：管理者＋組長）、'all'（管理者＋組長＋員工）、或角色陣列
 // App 推播（FCM）和 ntfy 並行；兩種都沒送到管理者時改寄 Email。通知失敗不影響打卡
 function notify_(title, message, priority, audience) {
   var c = cfg_(), toAdmin = 0, ntfyOk = false, rep = { fcm: '', ntfy: '', mail: '' };
   try {
-    var list = devices_(audience === 'all' ? null : ['管理者', '組長']);
+    var roles = Array.isArray(audience) ? audience : audience === 'all' ? ['管理者', '組長', '員工'] : ['管理者', '組長'];
+    var list = devices_(roles);
     var r = fcm_(list, title, message, audience === 'all' ? 'all' : 'admin');
     toAdmin = r.sentAdmin;
     rep.fcm = '裝置 ' + list.length + '、送達 ' + r.sent + (r.error ? '、' + r.error : '');
@@ -616,7 +622,7 @@ function fcm_(list, title, body, tag) {
   var res = UrlFetchApp.fetchAll(reqs), sent = 0, sentAdmin = 0, error = '', dead = [];
   res.forEach(function (r, i) {
     var code = r.getResponseCode();
-    if (code < 300) { sent++; if (list[i].role !== '員工') sentAdmin++; return; }
+    if (code < 300) { sent++; if (list[i].role === '管理者' || list[i].role === '組長') sentAdmin++; return; }
     var t = r.getContentText();
     if (code === 404 || /UNREGISTERED|registration-token-not-registered|INVALID_ARGUMENT.*token|not a valid FCM registration token/i.test(t)) { if (list[i].row) dead.push(list[i].row); }
     else error = 'FCM ' + code + '：' + t.slice(0, 200);
@@ -646,7 +652,7 @@ function push_(b) {
     else sh.appendRow([token, who.name, who.role, dev, now, now, '有效']);
   } finally { lock.releaseLock(); }
   if (b.op === 'test') {
-    var r = fcm_([{ token: token, role: who.role, row: 0 }], '✅ 德化廟務通知已開啟', who.name + '，之後的' + (who.role === '員工' ? '公告和缺人提醒' : who.role === '組長' ? '簽到退、異常回報、缺人提醒和公告' : '簽到退、異常回報和缺人提醒') + '會顯示在這裡', 'test');
+    var r = fcm_([{ token: token, role: who.role, row: 0 }], '✅ 德化廟務通知已開啟', who.name + '，之後的' + (who.role === '員工' ? '公告和缺人提醒' : who.role === '組長' ? '簽到退、異常回報、缺人提醒和公告' : who.role === '前賢' ? '公告和異常回報' : '簽到退、異常回報和缺人提醒') + '會顯示在這裡', 'test');
     if (!r.sent) throw new Error('已登記，但測試通知沒送出：' + (r.error || '請稍後再試'));
   }
   return { registered: true };
@@ -668,7 +674,7 @@ function users_() {
   var sh = sheet_('users'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
   return sh.getRange(2, 1, n, 4).getDisplayValues().map(function (r, i) {
-    return { row: i + 2, pin: String(r[0]).trim(), name: String(r[1]).trim(), enabled: r[2] !== '否', role: r[3] === '管理者' ? '管理者' : r[3] === '組長' ? '組長' : '員工' };
+    return { row: i + 2, pin: String(r[0]).trim(), name: String(r[1]).trim(), enabled: r[2] !== '否', role: ['管理者', '組長', '前賢'].indexOf(r[3]) >= 0 ? r[3] : '員工' };
   }).filter(function (u) { return u.name; });
 }
 function auth_(code) {
@@ -682,7 +688,7 @@ function auth_(code) {
 // 員工專用功能：管理者 PIN 不能簽到、回報、排班
 function user_(code) {
   var u = auth_(code);
-  if (u.role === '管理者') throw new Error('管理者帳號不能使用這個功能');
+  if (u.role === '管理者' || u.role === '前賢') throw new Error(u.role + '帳號不能使用這個功能');
   return u.name;
 }
 
