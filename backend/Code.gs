@@ -21,7 +21,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.5';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.6';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -71,12 +71,56 @@ var SETTINGS = [
   ['推播：ntfy',     '是',  '是／否（舊的 ntfy 通知；App 推播穩定後可以關掉）']
 ];
 var _cfg = null;
+
+// ===== 快取：讀試算表很慢（每次 0.2–0.5 秒），常用資料放在 Script Cache 最多 10 分鐘 =====
+// App 裡任何寫入都會立刻清掉相關快取；直接改試算表會由 onEdit 清掉全部快取
+var CACHE_TTL = 600;
+var CK = { users: 'c_users', settings: 'c_settings', shifts: 'c_shifts_', news: 'c_news_', clock: 'c_clock_',
+           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev' };   // 結尾是 _ 的會加上今天日期
+var _users = null, _bustKeys = [];
+function cache_(key, loader) {
+  var c = CacheService.getScriptCache(), v = null;
+  try { v = c.get(key); } catch (e) {}
+  if (v) { try { return JSON.parse(v); } catch (e) {} }
+  var x = loader();
+  try { c.put(key, JSON.stringify(x), CACHE_TTL); } catch (e) {}
+  return x;
+}
+function bust_(names) {
+  var t = day_(0);
+  var keys = names.map(function (n) { var k = CK[n]; return /_$/.test(k) ? k + t : k; });
+  if (names.indexOf('users') >= 0) _users = null;
+  if (names.indexOf('settings') >= 0) _cfg = null;
+  _bustKeys = _bustKeys.concat(keys);
+  try { CacheService.getScriptCache().removeAll(keys); } catch (e) {}
+}
+function bustAll_() { bust_(Object.keys(CK)); }
+function onEdit() { bustAll_(); }   // 有人直接改試算表
+
+function settingsRows_() {
+  return cache_(CK.settings, function () {
+    var sh = sheet_('settings');
+    return sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 2).getDisplayValues() : [];
+  });
+}
+// 今天的簽到退（依時間順序）
+function clockToday_() {
+  var today = day_(0);
+  return cache_(CK.clock + today, function () {
+    var out = [], ck = sheet_('clock'), last = ck.getLastRow();
+    if (last < 2) return out;
+    var st = Math.max(2, last - 300);
+    ck.getRange(st, 1, last - st + 1, 6).getDisplayValues().forEach(function (r) {
+      if (normDate_(r[0]) === today) out.push({ time: hhmm_(r[1]), name: r[2], type: r[3], inRange: r[4], dist: r[5] });
+    });
+    return out;
+  });
+}
 function cfg_() {
   if (_cfg) return _cfg;
   var map = {};
   SETTINGS.forEach(function (r) { map[r[0]] = r[1]; });
-  var sh = sheet_('settings');
-  if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 2).getDisplayValues().forEach(function (r) {
+  settingsRows_().forEach(function (r) {
     if (r[0] && r[1] !== '') map[r[0]] = r[1];
   });
   var areas = String(map['住廟區域']).split(/[,，、]/).map(function (x) { return x.trim(); }).filter(String);
@@ -121,7 +165,11 @@ function doPost(e) {
 function handle_(fn) {
   var out;
   // 先強制寫入試算表：寫入被拒（例如資料驗證不符）時會在這裡變成錯誤，不會假裝成功
-  try { out = fn(); SpreadsheetApp.flush(); out.ok = true; }
+  try {
+    out = fn(); SpreadsheetApp.flush(); out.ok = true;
+    // 寫入完成後再清一次快取，避免寫入期間有人讀到舊資料又放回快取
+    if (_bustKeys.length) try { CacheService.getScriptCache().removeAll(_bustKeys); } catch (e) {}
+  }
   catch (err) { out = { ok: false, error: String(err.message || err) }; }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -135,18 +183,11 @@ function status_(code) {
   var name = who.name;
   var res = { name: name, leader: who.role === '組長', today: today, clock: { 簽到: null, 簽退: null }, schedule: [] };
 
-  var sh = sheet_('clock');
-  var last = sh.getLastRow();
-  if (last > 1) {
-    var start = Math.max(2, last - 300);
-    sh.getRange(start, 1, last - start + 1, 4).getDisplayValues().forEach(function (r) {
-      if (normDate_(r[0]) === today && r[2] === name) {
-        var tm = hhmm_(r[1]);
-        if (r[3] === '簽到' && !res.clock['簽到']) res.clock['簽到'] = tm;   // 第一次簽到
-        if (r[3] === '簽退') res.clock['簽退'] = tm;                         // 最後一次簽退
-      }
-    });
-  }
+  clockToday_().forEach(function (c) {
+    if (c.name !== name) return;
+    if (c.type === '簽到' && !res.clock['簽到']) res.clock['簽到'] = c.time;   // 第一次簽到
+    if (c.type === '簽退') res.clock['簽退'] = c.time;                         // 最後一次簽退
+  });
 
   res.days = cfg_().days;
   res.areas = cfg_().areas;
@@ -168,9 +209,10 @@ function shift_(b) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    var mine = shifts_(date, date).filter(function (s) { return s.name === name; });
+    var mine = shifts_(date, date, true).filter(function (s) { return s.name === name; });
     var sh = sheet_('schedule');
     var now = new Date();
+    bust_(['shifts']);
     if (b.op === 'add') {
       if (mine.length) throw new Error('你已經登記這天了');
       sh.appendRow(["'" + date, name, '', '', '', '自選', '已登記', now, '']);
@@ -189,7 +231,16 @@ function shift_(b) {
 }
 
 // 讀排班表中「有效」的班（排除已取消），日期區間含頭尾
-function shifts_(from, to) {
+function shifts_(from, to, fresh) {
+  var today = day_(0);
+  if (!fresh && from >= today) {
+    return cache_(CK.shifts + today, function () {
+      return readShifts_(today, '9999-12-31').map(function (s) { s.created = ''; return s; });
+    }).filter(function (s) { return s.date >= from && s.date <= to; });
+  }
+  return readShifts_(from, to);
+}
+function readShifts_(from, to) {
   var sh = sheet_('schedule'), out = [];
   var n = sh.getLastRow() - 1;
   if (n < 1) return out;
@@ -219,6 +270,7 @@ function clock_(b) {
     inRange = dist <= cfg_().radius ? '是' : '否';
   }
   // 日期、時間前加 ' 存成文字，避免試算表自動轉格式
+  bust_(['clock']);
   sheet_('clock').appendRow(["'" + fmt_(now, 'yyyy-MM-dd'), "'" + fmt_(now, 'HH:mm:ss'), name, b.type,
                              inRange, dist, lat, lng, acc, now]);
 
@@ -253,6 +305,7 @@ function report_(b) {
       links[i] = folder.createFile(blob).getUrl();
     });
   }
+  bust_(['reports']);
   sheet_('report').appendRow(["'" + fmt_(now, 'yyyy-MM-dd'), "'" + fmt_(now, 'HH:mm:ss'), "'" + b.date, name, b.kind,
                               text, links[0], links[1], links[2], now]);
 
@@ -343,6 +396,7 @@ function stay_(b) {
   });
   var now = new Date(), d = "'" + fmt_(now, 'yyyy-MM-dd'), t = "'" + fmt_(now, 'HH:mm:ss');
   var sh = sheet_('stay');
+  bust_(['stays']);
   sh.getRange(sh.getLastRow() + 1, 1, rows.length, 6).setValues(rows.map(function (r) {
     return [d, t, who, r.area, r.name, now];
   }));
@@ -368,6 +422,7 @@ function admin_(b) {
       if (users_().some(function (u) { return u.name === name; })) throw new Error('已經有「' + name + '」了');
       var pin = newPin_(b.pin);
       var nrole = b.role === '前賢' ? '前賢' : '員工';
+      bust_(['users', 'dev']);
       sheet_('users').appendRow(["'" + pin, name, '是', nrole]);
       log_(me.name, '新增人員', name + (nrole === '前賢' ? '（前賢）' : ''));
       return { name: name, pin: pin, role: nrole };
@@ -384,6 +439,7 @@ function admin_(b) {
     if (op === 'setRole') {
       if (target.role === '管理者') throw new Error('管理者帳號不能改角色');
       var role = ['組長', '前賢'].indexOf(b.role) >= 0 ? b.role : '員工';
+      bust_(['users', 'dev']);
       sheet_('users').getRange(target.row, 4).setValue(role);
       log_(me.name, '角色改為' + role, target.name);
       return { name: target.name, role: role };
@@ -392,6 +448,7 @@ function admin_(b) {
       var np = String(b.pin || '').trim();
       if (!/^\d{6}$/.test(np)) throw new Error('管理者 PIN 要 6 位數字');
       if (users_().some(function (u) { return u.pin === np && u.row !== me.row; })) throw new Error('這組 PIN 已經有人用了');
+      bust_(['users']);
       sheet_('users').getRange(me.row, 1).setValue("'" + np);
       log_(me.name, '更換管理者 PIN', '');
       return { pin: np };
@@ -402,12 +459,14 @@ function admin_(b) {
       if (target.role === '管理者' && b.pin && !/^\d{6}$/.test(b.pin)) throw new Error('管理者 PIN 要 6 位數');
       var p = target.role === '管理者' ? String(b.pin || '') : newPin_(b.pin, target.row);
       if (target.role === '管理者' && users_().some(function (u) { return u.pin === p && u.row !== target.row; })) throw new Error('這組 PIN 已經有人用了');
+      bust_(['users']);
       sheet_('users').getRange(target.row, 1).setValue("'" + p);
       log_(me.name, '更換 PIN', target.name);
       return { name: target.name, pin: p };
     }
     if (op === 'setEnabled') {
       if (target.role === '管理者') throw new Error('管理者帳號請到試算表修改');
+      bust_(['users', 'dev']);
       sheet_('users').getRange(target.row, 3).setValue(b.enabled ? '是' : '否');
       log_(me.name, b.enabled ? '啟用' : '停用', target.name);
       return { name: target.name, enabled: !!b.enabled };
@@ -423,7 +482,8 @@ function admin_(b) {
       var date = normDate_(b.date);
       if (!date || date < today || date > day_(cfg_().days - 1)) throw new Error('日期超出可排班範圍');
       var sh = sheet_('schedule');
-      var mine = shifts_(date, date).filter(function (s) { return s.name === target.name; });
+      var mine = shifts_(date, date, true).filter(function (s) { return s.name === target.name; });
+      bust_(['shifts']);
       var st = hhmmIn_(b.start), en = hhmmIn_(b.end), note = String(b.note || '').slice(0, 50);
       if (b.mode === 'cancel') {
         if (!mine.length) throw new Error(target.name + ' 這天沒有班');
@@ -446,6 +506,7 @@ function admin_(b) {
       if (!d || d > today) throw new Error('日期錯誤');
       if (!t) throw new Error('請輸入時間');
       if (b.type !== '簽到' && b.type !== '簽退') throw new Error('類型錯誤');
+      bust_(['clock']);
       sheet_('clock').appendRow(["'" + d, "'" + t + ':00', target.name, b.type, me.role === '管理者' ? '管理者補登' : '組長補登', '', '', '', '', new Date()]);
       log_(me.name, '補登' + b.type, target.name + ' ' + d + ' ' + t);
       return { ok2: true };
@@ -453,6 +514,7 @@ function admin_(b) {
 
     if (op === 'settings') {
       var v = b.values || {}, sh2 = sheet_('settings');
+      bust_(['settings']);
       var rows = SETTINGS.map(function (x) {
         var val = v.hasOwnProperty(x[0]) ? String(v[x[0]]).trim() : null;
         return [x[0], val, x[2]];
@@ -480,6 +542,7 @@ function admin_(b) {
       if (!title || title.length > 40) throw new Error('標題請填 1–40 字');
       if (body.length > 1000) throw new Error('內容最多 1000 字');
       var res = fcm_(devices_(['員工', '組長', '前賢']), '📢 ' + title, body || title, 'news');
+      bust_(['news']);
       sheet_('news').appendRow(["'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm'), me.name, title, body, res.sent]);
       log_(me.name, '發公告', title + '（送達 ' + res.sent + ' 支手機）');
       return { sent: res.sent, error: res.error || '' };
@@ -492,28 +555,25 @@ function overview_(today, mode) {
   var c = cfg_(), full = mode === 'admin', viewer = mode === 'viewer';
   var users = users_().map(function (u) { return { name: u.name, pin: full && u.role !== '管理者' ? u.pin : '', enabled: u.enabled, role: u.role }; });
 
-  var clock = [], ck = sheet_('clock'), n = ck.getLastRow() - 1;
-  if (n > 0) {
-    var st = Math.max(2, ck.getLastRow() - 300);
-    ck.getRange(st, 1, ck.getLastRow() - st + 1, 6).getDisplayValues().forEach(function (r) {
-      if (normDate_(r[0]) === today) clock.push({ time: hhmm_(r[1]), name: r[2], type: r[3], inRange: r[4], dist: r[5] });
-    });
-  }
+  var clock = clockToday_();
   function tail(key, cols, k) {
     var sh = sheet_(key), m = sh.getLastRow() - 1;
     if (m < 1) return [];
     var s0 = Math.max(2, sh.getLastRow() - k + 1);
     return sh.getRange(s0, 1, sh.getLastRow() - s0 + 1, cols).getDisplayValues().reverse();
   }
-  var reports = tail('report', 9, 30).map(function (r) {
-    return { date: normDate_(r[0]), time: hhmm_(r[1]), forDate: normDate_(r[2]), name: r[3], kind: r[4], text: r[5], photos: [r[6], r[7], r[8]].filter(String) };
+  var reports = cache_(CK.reports, function () {
+    return tail('report', 9, 30).map(function (r) {
+      return { date: normDate_(r[0]), time: hhmm_(r[1]), forDate: normDate_(r[2]), name: r[3], kind: r[4], text: r[5], photos: [r[6], r[7], r[8]].filter(String) };
+    });
   });
-  var stays = tail('stay', 5, 60).map(function (r) { return { date: normDate_(r[0]), by: r[2], area: r[3], name: r[4] }; });
+  var stays = cache_(CK.stays, function () {
+    return tail('stay', 5, 60).map(function (r) { return { date: normDate_(r[0]), by: r[2], area: r[3], name: r[4] }; });
+  });
 
   var settings = {};
   SETTINGS.forEach(function (x) { settings[x[0]] = { value: x[1], note: x[2] }; });
-  var sh = sheet_('settings');
-  if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 2).getDisplayValues().forEach(function (r) {
+  settingsRows_().forEach(function (r) {
     if (settings[r[0]] && r[1] !== '') settings[r[0]].value = r[1];
   });
 
@@ -595,9 +655,11 @@ function devices_(roles) {
   }).filter(function (d) { return d.token && d.ok && d.status === '有效' && (!roles || roles.indexOf(d.role) >= 0); });
 }
 function deviceCount_() {
-  var out = {};
-  devices_(null).forEach(function (d) { out[d.name] = (out[d.name] || 0) + 1; });
-  return out;
+  return cache_(CK.dev, function () {
+    var out = {};
+    devices_(null).forEach(function (d) { out[d.name] = (out[d.name] || 0) + 1; });
+    return out;
+  });
 }
 
 // 送 FCM 推播。回傳 {sent, sentAdmin, error}；失效的 Token 自動標示「已失效」
@@ -629,6 +691,7 @@ function fcm_(list, title, body, tag) {
     else error = 'FCM ' + code + '：' + t.slice(0, 200);
   });
   if (dead.length) {
+    bust_(['dev']);
     var sh = sheet_('devices');
     dead.forEach(function (row) { sh.getRange(row, 7).setValue('已失效'); });
   }
@@ -643,6 +706,7 @@ function push_(b) {
   lock.waitLock(10000);
   try {
     var sh = sheet_('devices'), n = sh.getLastRow() - 1, row = 0, now = "'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm:ss');
+    bust_(['dev']);
     if (n > 0) sh.getRange(2, 1, n, 1).getDisplayValues().forEach(function (r, i) { if (r[0] === token) row = i + 2; });
     if (b.op === 'remove') {
       if (row) sh.getRange(row, 7).setValue('已登出');
@@ -661,6 +725,9 @@ function push_(b) {
 
 // 最近的公告（新的在前）
 function news_(max) {
+  return cache_(CK.news + day_(0), function () { return readNews_(max); });
+}
+function readNews_(max) {
   var sh = sheet_('news'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
   var s0 = Math.max(2, sh.getLastRow() - max + 1), since = day_(-CONFIG.NEWS_DAYS);
@@ -672,6 +739,11 @@ function news_(max) {
 // ===== 工具 =====
 // 人員分頁：[{row, pin, name, enabled, role}]
 function users_() {
+  if (_users) return _users;
+  _users = cache_(CK.users, readUsers_);
+  return _users;
+}
+function readUsers_() {
   var sh = sheet_('users'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
   return sh.getRange(2, 1, n, 4).getDisplayValues().map(function (r, i) {
@@ -752,6 +824,7 @@ function distanceM_(lat1, lng1, lat2, lng2) {
 
 // 部署前手動執行一次：確認分頁與欄位、建立每日檢查觸發器、觸發授權、發測試推播
 function setup() {
+  bustAll_();
   Object.keys(SHEETS).forEach(function (k) {
     var sh = sheet_(k), h = SHEETS[k].header;
     var cur = sh.getRange(1, 1, 1, h.length).getDisplayValues()[0];
