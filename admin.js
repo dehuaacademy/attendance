@@ -33,7 +33,13 @@ function adminStart(r) {
   syncPush();
 }
 function adminLoad() {
-  return adm('overview').then(function (d) { AD = d; adRender(); }).catch(function (e) { adMsg(e.message, true); });
+  var who = CODE;
+  if (!AD) { try { AD = JSON.parse(store(cacheKey('ad')) || 'null'); if (AD) adRender(); } catch (e) { AD = null; } }
+  return adm('overview').then(function (d) {
+    if (CODE !== who) return;
+    AD = d; adRender();
+    try { store(cacheKey('ad'), JSON.stringify(d)); } catch (e) {}
+  }).catch(function (e) { adMsg(e.message, true); });
 }
 function adm(op, extra) {
   var body = { action: 'admin', u: CODE, op: op };

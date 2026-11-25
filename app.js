@@ -72,9 +72,30 @@ function parse(r) {
 }
 
 // ===== 載入狀態與班表 =====
+// 先顯示手機上記住的上一次畫面，同時向後台要最新資料（打開 App 不用等）
+function cacheKey(k) { return 'dh_' + k + '_' + CODE; }
 function load() {
+  var who = CODE;
   return apiGet({ action: 'status', u: CODE }).then(function (r) {
-    if (r.role === 'admin' || r.role === 'viewer') { adminStart(r); return 'admin'; }
+    if (CODE !== who) return false;
+    store(cacheKey('st'), JSON.stringify(r));
+    if (r.role === 'admin' || r.role === 'viewer') {
+      var want = r.role === 'viewer' ? 'viewer' : 'admin';
+      if (ROLE !== want || $('admin').classList.contains('hide')) adminStart(r);
+      return 'admin';
+    }
+    applyStatus(r);
+    syncPush();
+    return true;
+  }).catch(function (e) {
+    if (/PIN/.test(e.message)) logout('PIN 錯誤或已停用，請重新輸入');
+    else if (!$('app').classList.contains('hide')) { msg('mClock', '無法連線，畫面是上次的資料，請確認網路後重新整理', 'err'); }
+    else if (!$('admin').classList.contains('hide')) adMsg('無法連線，畫面是上次的資料', true);
+    else msg('mLogin', '無法連線，請確認網路後再試', 'err');
+    return false;
+  });
+}
+function applyStatus(r) {
     NAME = r.name;
     ROLE = r.leader ? 'leader' : 'staff';
     $('tab-lead').classList.toggle('hide', !r.leader);
@@ -90,14 +111,15 @@ function load() {
     renderNews(r.news);
     if (!$('news').classList.contains('hide')) newsSeen();
     renderPushCards();
-    syncPush();
-    return true;
-  }).catch(function (e) {
-    if (/PIN/.test(e.message)) logout('PIN 錯誤或已停用，請重新輸入');
-    else if (!$('app').classList.contains('hide')) { $('who').textContent = '連線失敗'; msg('mClock', '無法連線，請確認網路後重新整理', 'err'); }
-    else msg('mLogin', '無法連線，請確認網路後再試', 'err');
-    return false;
-  });
+}
+// 打開 App：有上次的資料就立刻畫出來
+function startCached() {
+  var r = null;
+  try { r = JSON.parse(store(cacheKey('st')) || 'null'); } catch (e) {}
+  if (!r) { show('app'); return; }
+  if (r.role === 'admin' || r.role === 'viewer') { adminStart(r); return; }
+  if (r.today !== todayStr()) { r.today = todayStr(); r.clock = { 簽到: null, 簽退: null }; }   // 昨天的打卡不要顯示
+  show('app'); applyStatus(r);
 }
 
 // 班表：今天起 N 天，每天一列；點按鈕登記／取消自己的班
@@ -274,7 +296,10 @@ else {
   $('rDate').value = todayStr();
   renderPhotos();
   buildStay(false);
-  if (CODE) { show('app'); load(); } else show('login');
   // 管理者 PIN 是 6 位數
   $('pin').maxLength = 6; $('pin').placeholder = 'PIN 碼';
+  // 等 admin.js、push.js 也載入完再啟動
+  document.addEventListener('DOMContentLoaded', function () {
+    if (CODE) { startCached(); load(); } else show('login');
+  });
 }
