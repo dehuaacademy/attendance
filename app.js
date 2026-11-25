@@ -289,6 +289,27 @@ function send() {
     });
 }
 
+// ===== 自動更新：回到 App 時、以及開著的時候每 60 秒更新一次；也可以按 ↻ =====
+var lastRefresh = 0;
+function canAutoRender() {
+  var a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;      // 正在輸入
+  if (typeof schedOpen !== 'undefined' && schedOpen) return false;          // 排班表單開著
+  if (ROLE === 'admin' && adTab === 'settings') return false;
+  return !['nuName', 'nuPin', 'nwTitle', 'nwBody', 'apPin'].some(function (id) { return $(id) && $(id).value; });
+}
+function refresh(force) {
+  if (!CODE || document.hidden) return;
+  if (!force && (Date.now() - lastRefresh < 15000 || busy)) return;
+  lastRefresh = Date.now();
+  if (force) toast('更新中…');
+  if (ROLE === 'admin' || ROLE === 'viewer') { if (force || canAutoRender()) adminLoad(); return; }
+  load();
+  if (AD && !$('lead').classList.contains('hide') && (force || canAutoRender())) adminLoad();
+}
+document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+setInterval(function () { refresh(); }, 60000);
+
 // ===== 啟動 =====
 document.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.id === 'pin') login(); });
 if (!/^https?:\/\//.test(API)) invalid('系統尚未設定完成');

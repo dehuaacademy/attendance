@@ -32,15 +32,32 @@ function adminStart(r) {
   adminLoad();
   syncPush();
 }
+var adLast = '';
 function adminLoad() {
   var who = CODE;
   if (!AD) { try { AD = JSON.parse(store(cacheKey('ad')) || 'null'); if (AD) adRender(); } catch (e) { AD = null; } }
   return adm('overview').then(function (d) {
     if (CODE !== who) return;
-    AD = d; adRender();
-    try { store(cacheKey('ad'), JSON.stringify(d)); } catch (e) {}
+    var js = JSON.stringify(d);
+    if (js === adLast && AD) return;          // 沒有新資料就不重畫
+    adLast = js; AD = d; adRender();
+    try { store(cacheKey('ad'), js); } catch (e) {}
   }).catch(function (e) { adMsg(e.message, true); });
 }
+
+// ---- 照片：在 App 裡直接看（透過後台讀取，照片仍是私人檔案）----
+var PHOTOS = {};
+function adPhoto(url) {
+  var m = String(url).match(/\/d\/([-\w]{20,})/), id = m && m[1];
+  if (!id) { window.open(url, '_blank'); return; }
+  $('lbImg').removeAttribute('src'); $('lbMsg').textContent = '載入照片中…'; $('lightbox').classList.remove('hide');
+  var show = function (src) { $('lbImg').src = src; $('lbMsg').textContent = '點一下關閉'; };
+  if (PHOTOS[id]) { show(PHOTOS[id]); return; }
+  apiPost({ action: 'photo', u: CODE, id: id }).then(function (r) {
+    PHOTOS[id] = 'data:' + r.mime + ';base64,' + r.data; show(PHOTOS[id]);
+  }).catch(function (e) { $('lbMsg').textContent = e.message === 'Failed to fetch' ? '網路異常，請再試一次' : e.message; });
+}
+function closePhoto() { $('lightbox').classList.add('hide'); }
 function adm(op, extra) {
   var body = { action: 'admin', u: CODE, op: op };
   for (var k in (extra || {})) body[k] = extra[k];
@@ -205,7 +222,7 @@ function adLog() {
   AD.reports.forEach(function (r) {
     h += '<div class="rep"><div><b>' + esc(r.name) + '</b> <span class="kind' + (r.kind === '異常回報' ? ' bad' : '') + '">' + esc(r.kind) + '</span><small>' + esc(r.date) + ' ' + esc(r.time) + '</small></div>'
        + '<p>' + esc(r.text) + '</p>'
-       + (r.photos.length ? '<div class="pl">' + r.photos.map(function (p, i) { return '<a href="' + esc(p) + '" target="_blank" rel="noopener">照片 ' + (i + 1) + '</a>'; }).join('') + '</div>' : '') + '</div>';
+       + (r.photos.length ? '<div class="pl">' + r.photos.map(function (p, i) { return '<button class="sb" onclick="adPhoto(\'' + esc(p) + '\')">📷 照片 ' + (i + 1) + '</button>'; }).join(' ') + '</div>' : '') + '</div>';
   });
   h += '</div><div class="card"><h3 class="ah">最近的住廟回報</h3>' + (AD.stays.length ? '' : '<div class="empty">還沒有住廟回報</div>');
   var cur = '';
