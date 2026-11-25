@@ -6,22 +6,24 @@
  * 前台網頁放在 GitHub Pages：https://dehuaacademy.github.io/attendance/
  *
  * 試算表分頁：
- *   人員     PIN｜姓名｜啟用（是／否）｜角色（員工／組長／前賢／管理者）
+ *   人員     PIN｜姓名｜啟用（是／否）｜角色（組員／組長／前賢／執行長／財務／管理者）（舊資料的「員工」視同組員）
+ *            執行長、財務＝唯讀看出勤＋零用金權限（執行長核准大額、財務撥款與核對）
  *            前賢＝唯讀帳號（看回報、排班、公告，收公告與異常回報通知），可多人共用一組 PIN ← App 管理介面或這裡都能改
  *   設定     項目｜值｜說明  ← 區域、定位範圍、可排班天數、推播開關；App 管理介面可改
  *   操作紀錄 管理者在 App 上的每一個操作
- *   排班表   員工在 App 自選日期登記／取消（系統寫入）；管理者也可以直接加列或改狀態
+ *   排班表   組員在 App 自選日期登記／取消（系統寫入）；管理者也可以直接加列或改狀態
  *   打卡紀錄 系統自動寫入
  *   回報     事務回報，系統自動寫入（照片存雲端硬碟，這裡放連結）
  *   住廟回報 每位住廟者一列：送出日期｜回報人｜區域｜姓名（送出日期即住廟日期）
  *   推播裝置 每支開啟通知的手機一列（App 自動登記；失效的會標示，不用手動整理）
  *   公告     管理者在 App 發的公告
+ *   零用金   零用金帳本（撥入／繳回／支出／代墊），收據照片存雲端硬碟
  *   統計     每天自動更新（也可從選單「德化廟務 → 更新統計」手動更新），不在 App 顯示
  *
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.8';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.9';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -56,6 +58,7 @@ var SHEETS = {
   stay:     { name: '住廟回報', header: ['送出日期', '送出時間', '回報人', '區域', '姓名', '伺服器時間戳記'] },
   devices:  { name: '推播裝置', header: ['Token', '姓名', '角色', '裝置', '登記時間', '最後更新', '狀態'] },
   news:     { name: '公告',     header: ['時間', '發布者', '標題', '內容', '送達手機數'] },
+  cash:     { name: '零用金',   header: ['編號', '建立時間', '日期', '類型', '金額', '科目', '說明', '經手人', '收據1', '收據2', '收據3', '狀態', '核准金額', '核准人', '核准時間', '核對人', '核對時間', '還款時間', '備註'] },
   stats:    { name: '統計',     header: ['月份', '姓名', '排班天數', '出勤天數', '實際出勤時數', '缺簽退天數', '更新時間'] }
 };
 
@@ -68,15 +71,26 @@ var SETTINGS = [
   ['推播：異常回報', '是',  '是／否'],
   ['推播：排班異動', '是',  '是／否'],
   ['推播：缺人檢查', '是',  '是／否（每天 8 點檢查未來 7 天；管理者和同仁都會收到）'],
-  ['推播：ntfy',     '是',  '是／否（舊的 ntfy 通知；App 推播穩定後可以關掉）']
+  ['推播：ntfy',     '是',  '是／否（舊的 ntfy 通知；App 推播穩定後可以關掉）'],
+  ['推播：零用金',   '是',  '是／否（支出、待核准、撥款、低餘額通知）'],
+  ['零用金科目',     '香燭供品,供果供品,食材,清潔用品,水電修繕,交通,餐點,文具,雜支', '用逗號分隔'],
+  ['零用金核准門檻(元)', '5000', '超過這個金額要先申請，執行長核准後才能花'],
+  ['免核准科目',     '供果供品', '這些科目超過門檻也不用核准，用逗號分隔'],
+  ['零用金低餘額(元)', '2000', '組長手上餘額低於這個數字時通知組長、財務、管理者']
 ];
 var _cfg = null;
+
+// ===== 角色 =====
+var ROLES = ['組員', '組長', '前賢', '執行長', '財務', '管理者'];
+var VIEW_ROLES = ['前賢', '執行長', '財務'];     // 唯讀看出勤（排班、回報、公告）
+var PUSH_DESC = { '組員': '公告和缺人提醒', '組長': '簽到退、異常回報、缺人提醒、零用金和公告', '前賢': '公告和異常回報',
+                  '執行長': '公告和零用金核准', '財務': '公告和零用金', '管理者': '簽到退、異常回報、缺人提醒和零用金' };
 
 // ===== 快取：讀試算表很慢（每次 0.2–0.5 秒），常用資料放在 Script Cache 最多 10 分鐘 =====
 // App 裡任何寫入都會立刻清掉相關快取；直接改試算表會由 onEdit 清掉全部快取
 var CACHE_TTL = 600;
 var CK = { users: 'c_users', settings: 'c_settings', shifts: 'c_shifts_', news: 'c_news_', clock: 'c_clock_',
-           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos' };   // 結尾是 _ 的會加上今天日期
+           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash' };   // 結尾是 _ 的會加上今天日期
 var _users = null, _bustKeys = [];
 function cache_(key, loader) {
   var c = CacheService.getScriptCache(), v = null;
@@ -116,6 +130,7 @@ function clockToday_() {
     return out;
   });
 }
+function splitList_(v) { return String(v || '').split(/[,，、]/).map(function (x) { return x.trim(); }).filter(String); }
 function cfg_() {
   if (_cfg) return _cfg;
   var map = {};
@@ -134,7 +149,12 @@ function cfg_() {
     nGap: map['推播：缺人檢查'] !== '否',
     nNtfy: map['推播：ntfy'] !== '否',
     ntfy: String(map['ntfy頻道'] || '').trim(),
-    mailTo: String(map['備援Email'] || '').trim()
+    mailTo: String(map['備援Email'] || '').trim(),
+    nCash: map['推播：零用金'] !== '否',
+    cashCats: splitList_(map['零用金科目']),
+    cashLimit: Number(map['零用金核准門檻(元)']) || 5000,
+    cashExempt: splitList_(map['免核准科目']),
+    cashLow: Number(map['零用金低餘額(元)']) || 2000
   };
   return _cfg;
 }
@@ -160,6 +180,7 @@ function doPost(e) {
     if (body.action === 'push')   return push_(body);
     if (body.action === 'photo')  return photo_(body);
     if (body.action === 'thumbs') return thumbs_(body);
+    if (body.action === 'cash')   return cash_(body);
     throw new Error('未知的操作');
   });
 }
@@ -181,7 +202,7 @@ function status_(code) {
   var who = auth_(code);
   var today = fmt_(new Date(), 'yyyy-MM-dd');
   if (who.role === '管理者') return { name: who.name, role: 'admin', today: today };
-  if (who.role === '前賢') return { name: who.name, role: 'viewer', today: today };
+  if (VIEW_ROLES.indexOf(who.role) >= 0) return { name: who.name, role: 'viewer', title: who.role, today: today };
   var name = who.name;
   var res = { name: name, leader: who.role === '組長', today: today, clock: { 簽到: null, 簽退: null }, schedule: [] };
 
@@ -410,7 +431,7 @@ function admin_(b) {
   var me = auth_(b.u);
   var LEADER_OPS = ['overview', 'shift', 'clockFix'];   // 組長可以做的管理操作
   var VIEWER_OPS = ['overview'];                        // 前賢只能看
-  var allowed = me.role === '管理者' || (me.role === '組長' && LEADER_OPS.indexOf(b.op) >= 0) || (me.role === '前賢' && VIEWER_OPS.indexOf(b.op) >= 0);
+  var allowed = me.role === '管理者' || (me.role === '組長' && LEADER_OPS.indexOf(b.op) >= 0) || (VIEW_ROLES.indexOf(me.role) >= 0 && VIEWER_OPS.indexOf(b.op) >= 0);
   if (!allowed) throw new Error('沒有管理權限');
   var op = b.op, today = day_(0), r;
   var lock = LockService.getScriptLock();
@@ -423,10 +444,10 @@ function admin_(b) {
       if (!name || name.length > 20) throw new Error('請輸入姓名');
       if (users_().some(function (u) { return u.name === name; })) throw new Error('已經有「' + name + '」了');
       var pin = newPin_(b.pin);
-      var nrole = b.role === '前賢' ? '前賢' : '員工';
+      var nrole = VIEW_ROLES.indexOf(b.role) >= 0 ? b.role : '組員';
       bust_(['users', 'dev']);
       sheet_('users').appendRow(["'" + pin, name, '是', nrole]);
-      log_(me.name, '新增人員', name + (nrole === '前賢' ? '（前賢）' : ''));
+      log_(me.name, '新增人員', name + (nrole !== '組員' ? '（' + nrole + '）' : ''));
       return { name: name, pin: pin, role: nrole };
     }
 
@@ -440,7 +461,7 @@ function admin_(b) {
 
     if (op === 'setRole') {
       if (target.role === '管理者') throw new Error('管理者帳號不能改角色');
-      var role = ['組長', '前賢'].indexOf(b.role) >= 0 ? b.role : '員工';
+      var role = ['組長'].concat(VIEW_ROLES).indexOf(b.role) >= 0 ? b.role : '組員';
       bust_(['users', 'dev']);
       sheet_('users').getRange(target.row, 4).setValue(role);
       log_(me.name, '角色改為' + role, target.name);
@@ -474,13 +495,13 @@ function admin_(b) {
       return { name: target.name, enabled: !!b.enabled };
     }
     if (op === 'device') {
-      if (!target || target.role === '管理者' || !target.enabled) throw new Error('只能設定已啟用的員工');
+      if (!target || target.role === '管理者' || !target.enabled) throw new Error('只能設定已啟用的人員');
       log_(me.name, '設定手機登入', target.name);
       return { name: target.name, pin: target.pin };
     }
 
     if (op === 'shift') {
-      if (!target || (target.role !== '員工' && target.role !== '組長')) throw new Error('請選擇員工');
+      if (!target || (target.role !== '組員' && target.role !== '組長')) throw new Error('請選擇組員');
       var date = normDate_(b.date);
       if (!date || date < today || date > day_(cfg_().days - 1)) throw new Error('日期超出可排班範圍');
       var sh = sheet_('schedule');
@@ -503,7 +524,7 @@ function admin_(b) {
     }
 
     if (op === 'clockFix') {
-      if (!target || (target.role !== '員工' && target.role !== '組長')) throw new Error('請選擇員工');
+      if (!target || (target.role !== '組員' && target.role !== '組長')) throw new Error('請選擇組員');
       var d = normDate_(b.date), t = hhmmIn_(b.time);
       if (!d || d > today) throw new Error('日期錯誤');
       if (!t) throw new Error('請輸入時間');
@@ -543,7 +564,7 @@ function admin_(b) {
       var title = String(b.title || '').trim(), body = String(b.body || '').trim();
       if (!title || title.length > 40) throw new Error('標題請填 1–40 字');
       if (body.length > 1000) throw new Error('內容最多 1000 字');
-      var res = fcm_(devices_(['員工', '組長', '前賢']), '📢 ' + title, body || title, 'news');
+      var res = fcm_(devices_(['組員', '組長'].concat(VIEW_ROLES)), '📢 ' + title, body || title, 'news');
       bust_(['news']);
       sheet_('news').appendRow(["'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm'), me.name, title, body, res.sent]);
       log_(me.name, '發公告', title + '（送達 ' + res.sent + ' 支手機）');
@@ -587,13 +608,13 @@ function overview_(today, mode) {
   };
 }
 
-// 產生或檢查 4 位數員工 PIN（不重複、不用 0000 / 1234 這類）
+// 產生或檢查 4 位數 PIN（不重複、不用 0000 / 1234 這類）
 function newPin_(want, selfRow) {
   var used = {};
   users_().forEach(function (u) { if (u.row !== selfRow) used[u.pin] = true; });
   want = String(want || '').trim();
   if (want) {
-    if (!/^\d{4}$/.test(want)) throw new Error('員工 PIN 要 4 位數字');
+    if (!/^\d{4}$/.test(want)) throw new Error('PIN 要 4 位數字');
     if (used[want]) throw new Error('這組 PIN 已經有人用了');
     return want;
   }
@@ -609,12 +630,12 @@ function log_(who, action, detail) {
 }
 
 // ===== 推播通知 =====
-// audience：'admin'（預設：管理者＋組長）、'all'（管理者＋組長＋員工）、或角色陣列
+// audience：'admin'（預設：管理者＋組長）、'all'（管理者＋組長＋組員）、或角色陣列
 // App 推播（FCM）和 ntfy 並行；兩種都沒送到管理者時改寄 Email。通知失敗不影響打卡
 function notify_(title, message, priority, audience) {
   var c = cfg_(), toAdmin = 0, ntfyOk = false, rep = { fcm: '', ntfy: '', mail: '' };
   try {
-    var roles = Array.isArray(audience) ? audience : audience === 'all' ? ['管理者', '組長', '員工'] : ['管理者', '組長'];
+    var roles = Array.isArray(audience) ? audience : audience === 'all' ? ['管理者', '組長', '組員'] : ['管理者', '組長'];
     var list = devices_(roles);
     var r = fcm_(list, title, message, audience === 'all' ? 'all' : 'admin');
     toAdmin = r.sentAdmin;
@@ -700,7 +721,7 @@ function fcm_(list, title, body, tag) {
   return { sent: sent, sentAdmin: sentAdmin, error: error };
 }
 
-// App 登記／移除推播裝置、送測試通知（管理者與員工都可以）
+// App 登記／移除推播裝置、送測試通知（所有角色都可以）
 function push_(b) {
   var who = auth_(b.u), token = String(b.token || '').trim();
   if (!/^[\w:\-]{20,4096}$/.test(token)) throw new Error('推播代碼不正確');
@@ -719,10 +740,191 @@ function push_(b) {
     else sh.appendRow([token, who.name, who.role, dev, now, now, '有效']);
   } finally { lock.releaseLock(); }
   if (b.op === 'test') {
-    var r = fcm_([{ token: token, role: who.role, row: 0 }], '✅ 德化廟務通知已開啟', who.name + '，之後的' + (who.role === '員工' ? '公告和缺人提醒' : who.role === '組長' ? '簽到退、異常回報、缺人提醒和公告' : who.role === '前賢' ? '公告和異常回報' : '簽到退、異常回報和缺人提醒') + '會顯示在這裡', 'test');
+    var r = fcm_([{ token: token, role: who.role, row: 0 }], '✅ 德化廟務通知已開啟', who.name + '，之後的' + PUSH_DESC[who.role] + '會顯示在這裡', 'test');
     if (!r.sent) throw new Error('已登記，但測試通知沒送出：' + (r.error || '請稍後再試'));
   }
   return { registered: true };
+}
+
+// ===== 零用金 =====
+// 一本帳：撥入（財務→組長，餘額＋）、繳回（組長→財務，餘額－）、支出（組長用零用金付）、代墊（組員自己先付，組長之後還）
+// 超過門檻（預設 5000）且不是免核准科目（預設供果供品）→ 先「申請」，執行長核准後才花，花完補收據
+// 狀態：待核准 → 已核准 →（補收據）→ 待核對 → 已核對；代墊：待還款 →（組長還款）→ 待核對 → 已核對；退回、作廢不計入
+// 組長手上餘額 ＝ 撥入 − 繳回 − 支出（已核准／待核對／已核對）− 代墊（已還款，即待核對／已核對）
+var CASH_COLS = 19;
+var CASH_SPENT = { '支出': ['已核准', '待核對', '已核對'], '代墊': ['待核對', '已核對'] };
+function cashCaps_(role) {
+  var adm = role === '管理者';
+  return {
+    spend: adm || role === '組長', advance: adm || role === '組長' || role === '組員', fund: adm || role === '財務',
+    approve: role === '執行長', check: adm || role === '財務', repay: adm || role === '組長', all: role !== '組員'
+  };
+}
+function cashRows_() {
+  var sh = sheet_('cash'), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  return sh.getRange(2, 1, n, CASH_COLS).getDisplayValues().map(function (r, i) {
+    return { row: i + 2, id: r[0], created: r[1], date: normDate_(r[2]), type: r[3], amount: Number(String(r[4]).replace(/[^\d.-]/g, '')) || 0,
+             cat: r[5], note: r[6], by: r[7], photos: [r[8], r[9], r[10]].filter(String), status: r[11],
+             apprAmt: r[12], apprBy: r[13], apprAt: r[14], checkBy: r[15], checkAt: r[16], repaidAt: r[17], remark: r[18] };
+  }).filter(function (x) { return x.id; });
+}
+function cashDelta_(e) {
+  if (e.status === '作廢' || e.status === '退回') return 0;
+  if (e.type === '撥入') return e.amount;
+  if (e.type === '繳回') return -e.amount;
+  return (CASH_SPENT[e.type] || []).indexOf(e.status) >= 0 ? -e.amount : 0;
+}
+function cashData_() {
+  return cache_(CK.cash, function () {
+    var all = cashRows_(), bal = 0;
+    all.forEach(function (e) { bal += cashDelta_(e); });
+    return { balance: bal, rows: all.slice(-300) };
+  });
+}
+function cashBig_(amount, cat) { var c = cfg_(); return amount > c.cashLimit && c.cashExempt.indexOf(cat) < 0; }
+function cashSavePhotos_(photos, name) {
+  var links = ['', '', ''];
+  if (!photos.length) return links;
+  if (photos.length > CONFIG.MAX_PHOTOS) throw new Error('收據照片最多 ' + CONFIG.MAX_PHOTOS + ' 張');
+  var now = new Date(), folder = monthFolder_(now), stamp = fmt_(now, 'yyyyMMdd_HHmmss');
+  photos.forEach(function (p, i) {
+    var data = String(p).replace(/^data:image\/\w+;base64,/, '');
+    if (data.length > CONFIG.MAX_PHOTO_CHARS) throw new Error('第 ' + (i + 1) + ' 張照片太大');
+    links[i] = folder.createFile(Utilities.newBlob(Utilities.base64Decode(data), 'image/jpeg', stamp + '_收據_' + name + '_' + (i + 1) + '.jpg')).getUrl();
+  });
+  return links;
+}
+function cashNotify_(title, body, roles, names) {
+  if (!cfg_().nCash) return;
+  try {
+    var seen = {}, list = devices_(null).filter(function (d) {
+      if (seen[d.token] || (roles.indexOf(d.role) < 0 && (names || []).indexOf(d.name) < 0)) return false;
+      return (seen[d.token] = true);
+    });
+    fcm_(list, title, body, 'cash');
+  } catch (e) {}
+}
+function money_(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+function cash_(b) {
+  var me = auth_(b.u), caps = cashCaps_(me.role), c = cfg_(), op = b.op;
+  if (op === 'list') {
+    var d = cashData_(), rows = d.rows.slice().reverse();
+    if (!caps.all) rows = rows.filter(function (e) { return e.by === me.name; });
+    rows.forEach(function (e) { delete e.row; });
+    return { me: { name: me.name, role: me.role }, caps: caps, balance: caps.all ? d.balance : null, low: c.cashLow,
+             limit: c.cashLimit, exempt: c.cashExempt, cats: c.cashCats, today: day_(0), rows: rows };
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = sheet_('cash'), before = cashData_().balance, now = new Date(), stamp = "'" + fmt_(now, 'yyyy-MM-dd HH:mm');
+    var res = cashWrite_(b, me, caps, c, sh, now, stamp);
+    bust_(['cash', 'photos']);
+    var after = 0; cashRows_().forEach(function (e) { after += cashDelta_(e); });
+    if (before >= c.cashLow && after < c.cashLow)
+      cashNotify_('⚠️ 零用金餘額剩 ' + money_(after) + ' 元', '低於 ' + money_(c.cashLow) + ' 元，請財務撥款', ['組長', '財務', '管理者']);
+    res.balance = after;
+    return res;
+  } finally { lock.releaseLock(); }
+}
+
+function cashWrite_(b, me, caps, c, sh, now, stamp) {
+  var op = b.op, note = String(b.note || '').trim().slice(0, 200);
+  if (op === 'add') {
+    var type = b.type, amount = Math.round(Number(b.amount));
+    if (!(amount > 0 && amount <= 1000000)) throw new Error('金額請填 1 到 1,000,000');
+    var date = normDate_(b.date) || day_(0);
+    var photos = Array.isArray(b.photos) ? b.photos : [];
+    var cat = '', status;
+    if (type === '撥入' || type === '繳回') {
+      if (!caps.fund) throw new Error('只有財務可以撥款或登記繳回');
+      if (date > day_(0)) throw new Error('日期不能是未來');
+      status = '已入帳';
+    } else if (type === '支出' || type === '代墊') {
+      if (type === '支出' && !caps.spend) throw new Error('支出由組長登記；自己先付的請選「代墊」');
+      if (type === '代墊' && !caps.advance) throw new Error('沒有權限登記代墊');
+      cat = String(b.cat || '');
+      if (c.cashCats.indexOf(cat) < 0) throw new Error('請選擇科目');
+      if (!note) throw new Error('請填說明（買了什麼）');
+      var big = cashBig_(amount, cat);
+      if (!big && date > day_(0)) throw new Error('日期不能是未來');
+      status = big ? '待核准' : type === '支出' ? '待核對' : '待還款';
+    } else throw new Error('類型錯誤');
+    var links = cashSavePhotos_(photos, me.name);
+    var used = {}, id;
+    cashRows_().forEach(function (x) { used[x.id] = 1; });
+    do { id = 'C' + fmt_(now, 'yyMMddHHmmss') + Math.floor(Math.random() * 900 + 100); } while (used[id]);
+    sh.appendRow([id, stamp, "'" + date, type, amount, cat, note, me.name, links[0], links[1], links[2], status, '', '', '', '', '', '', '']);
+    log_(me.name, '零用金' + type, money_(amount) + ' ' + cat + ' ' + note + '（' + status + '）');
+    var t = money_(amount) + ' 元';
+    if (status === '待核准') cashNotify_('📝 待核准：' + me.name + ' 申請' + type + ' ' + t, cat + '・' + note, ['執行長', '管理者']);
+    else if (type === '撥入') cashNotify_('💰 零用金撥入 ' + t, me.name + (note ? '：' + note : ''), ['組長', '管理者']);
+    else if (type === '繳回') cashNotify_('↩️ 零用金繳回 ' + t, me.name + (note ? '：' + note : ''), ['組長', '財務', '管理者']);
+    else cashNotify_('🧾 ' + me.name + ' ' + type + ' ' + t, cat + '・' + note + (links[0] ? '' : '（沒有收據照片）'), ['財務', '管理者']);
+    return { id: id, status: status };
+  }
+
+  var e = cashRows_().filter(function (x) { return x.id === String(b.id || ''); })[0];
+  if (!e) throw new Error('找不到這筆紀錄，請重新整理');
+  var amt = money_(e.amount) + ' 元';
+
+  if (op === 'approve' || op === 'reject') {
+    if (!caps.approve) throw new Error('只有執行長可以核准');
+    if (e.status !== '待核准') throw new Error('這筆已經是「' + e.status + '」');
+    if (op === 'reject' && !note) throw new Error('請填退回原因');
+    sh.getRange(e.row, 12, 1, 4).setValues([[op === 'approve' ? '已核准' : '退回', e.amount, me.name, stamp]]);
+    if (note) sh.getRange(e.row, 19).setValue(note);
+    log_(me.name, op === 'approve' ? '核准零用金' : '退回零用金', e.by + ' ' + amt + ' ' + e.note + (note ? '（' + note + '）' : ''));
+    cashNotify_(op === 'approve' ? '✅ 已核准：' + e.by + ' ' + amt : '❌ 退回：' + e.by + ' ' + amt,
+                e.cat + '・' + e.note + (op === 'approve' ? '\n花完後請在 App 補上收據' : '\n原因：' + note), ['組長', '管理者'], [e.by]);
+    return { status: op === 'approve' ? '已核准' : '退回' };
+  }
+  if (op === 'receipt') {
+    if (e.status !== '已核准') throw new Error('這筆不需要補收據');
+    if (e.by !== me.name && !caps.repay) throw new Error('只有申請人或組長可以補收據');
+    var real = Math.round(Number(b.amount));
+    if (!(real > 0 && real <= 1000000)) throw new Error('請填實際金額');
+    var ph = Array.isArray(b.photos) ? b.photos : [];
+    if (!ph.length) throw new Error('請拍收據');
+    var lk = cashSavePhotos_(ph, e.by), ns = e.type === '支出' ? '待核對' : '待還款';
+    sh.getRange(e.row, 5).setValue(real);
+    sh.getRange(e.row, 9, 1, 4).setValues([[lk[0], lk[1], lk[2], ns]]);
+    if (note) sh.getRange(e.row, 19).setValue(note);
+    log_(me.name, '零用金補收據', e.by + ' ' + money_(real) + ' 元（核准 ' + money_(e.amount) + '）');
+    cashNotify_('🧾 ' + e.by + ' ' + e.type + ' ' + money_(real) + ' 元（已核准）', e.cat + '・' + e.note + (real > e.amount ? '\n⚠️ 超過核准金額 ' + money_(e.amount) : ''), ['財務', '管理者']);
+    return { status: ns };
+  }
+  if (op === 'repay') {
+    if (!caps.repay) throw new Error('只有組長可以登記還款');
+    if (e.type !== '代墊' || e.status !== '待還款') throw new Error('這筆不是待還款的代墊');
+    sh.getRange(e.row, 12).setValue('待核對');
+    sh.getRange(e.row, 18).setValue(stamp);
+    log_(me.name, '還代墊', e.by + ' ' + amt);
+    cashNotify_('💵 已還代墊：' + e.by + ' ' + amt, e.cat + '・' + e.note, ['財務', '管理者'], [e.by]);
+    return { status: '待核對' };
+  }
+  if (op === 'check') {
+    if (!caps.check) throw new Error('只有財務可以核對');
+    if (e.status !== '待核對') throw new Error('這筆已經是「' + e.status + '」');
+    sh.getRange(e.row, 12).setValue('已核對');
+    sh.getRange(e.row, 16, 1, 2).setValues([[me.name, stamp]]);
+    if (note) sh.getRange(e.row, 19).setValue(note);
+    log_(me.name, '核對零用金', e.by + ' ' + amt + ' ' + e.note);
+    return { status: '已核對' };
+  }
+  if (op === 'void') {
+    var mine = e.by === me.name && ['待核准', '已核准', '待核對', '待還款', '已入帳'].indexOf(e.status) >= 0;
+    var adm = me.role === '管理者' && ['已核對', '作廢'].indexOf(e.status) < 0;
+    if (!mine && !adm) throw new Error(e.status === '已核對' ? '已核對的紀錄不能作廢' : '只有登記的人可以作廢');
+    if (!note) throw new Error('請填作廢原因');
+    sh.getRange(e.row, 12).setValue('作廢');
+    sh.getRange(e.row, 19).setValue(note);
+    log_(me.name, '作廢零用金', e.by + ' ' + e.type + ' ' + amt + '（' + note + '）');
+    return { status: '作廢' };
+  }
+  throw new Error('未知的零用金操作');
 }
 
 // 回報照片：在 App 裡直接看（照片仍是私人檔案，只透過後台、憑 PIN 讀取）
@@ -730,20 +932,24 @@ function push_(b) {
 function photoIds_() {
   return cache_(CK.photos, function () {
     var sh = sheet_('report'), last = sh.getLastRow(), ids = {};
-    if (last < 2) return ids;
     var st = Math.max(2, last - 1000);
+    if (last >= 2)
     sh.getRange(st, 7, last - st + 1, 3).getDisplayValues().forEach(function (r) {
       r.forEach(function (u) { var m = String(u).match(/\/d\/([-\w]{20,})/); if (m) ids[m[1]] = 1; });
+    });
+    // 零用金收據：記下經手人，組員只能看自己的收據
+    cashData_().rows.forEach(function (e) {
+      e.photos.forEach(function (u) { var m = String(u).match(/\/d\/([-\w]{20,})/); if (m) ids[m[1]] = e.by || 1; });
     });
     return ids;
   });
 }
-var PHOTO_ROLES = ['管理者', '組長', '前賢'];
+var PHOTO_ROLES = ['管理者', '組長', '前賢', '執行長', '財務'];
 function photo_(b) {
   var who = auth_(b.u);
-  if (PHOTO_ROLES.indexOf(who.role) < 0) throw new Error('沒有權限看照片');
-  var id = String(b.id || '');
-  if (!/^[-\w]{20,}$/.test(id) || !photoIds_()[id]) throw new Error('找不到這張照片');
+  var id = String(b.id || ''), own = photoIds_()[id];
+  if (!/^[-\w]{20,}$/.test(id) || !own) throw new Error('找不到這張照片');
+  if (PHOTO_ROLES.indexOf(who.role) < 0 && own !== who.name) throw new Error('沒有權限看照片');
   var blob = DriveApp.getFileById(id).getBlob();
   var bytes = blob.getBytes();
   if (bytes.length > 4000000) throw new Error('照片太大，請到雲端硬碟查看');
@@ -754,8 +960,9 @@ function photo_(b) {
 // 剛上傳的照片 Drive 可能還沒做好縮圖，這時回傳空字串，前台改顯示按鈕，下次再試
 function thumbs_(b) {
   var who = auth_(b.u);
-  if (PHOTO_ROLES.indexOf(who.role) < 0) throw new Error('沒有權限看照片');
-  var ok = photoIds_(), ids = (b.ids || []).map(String).filter(function (id) { return /^[-\w]{20,}$/.test(id) && ok[id]; }).slice(0, 30);
+  var ok = photoIds_(), all = PHOTO_ROLES.indexOf(who.role) >= 0;
+  var ids = (b.ids || []).map(String).filter(function (id) { return /^[-\w]{20,}$/.test(id) && ok[id] && (all || ok[id] === who.name); }).slice(0, 30);
+  if (!all && !ids.length && (b.ids || []).length) throw new Error('沒有權限看照片');
   var map = {}, c = CacheService.getScriptCache(), got = {};
   if (!ids.length) return { map: map };
   try { got = c.getAll(ids.map(function (id) { return 'th_' + id; })) || {}; } catch (e) {}
@@ -807,7 +1014,7 @@ function readUsers_() {
   var sh = sheet_('users'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
   return sh.getRange(2, 1, n, 4).getDisplayValues().map(function (r, i) {
-    return { row: i + 2, pin: String(r[0]).trim(), name: String(r[1]).trim(), enabled: r[2] !== '否', role: ['管理者', '組長', '前賢'].indexOf(r[3]) >= 0 ? r[3] : '員工' };
+    return { row: i + 2, pin: String(r[0]).trim(), name: String(r[1]).trim(), enabled: r[2] !== '否', role: ROLES.indexOf(r[3]) >= 0 ? r[3] : '組員' };
   }).filter(function (u) { return u.name; });
 }
 function auth_(code) {
@@ -818,10 +1025,10 @@ function auth_(code) {
   }
   throw new Error('PIN 錯誤或已停用');
 }
-// 員工專用功能：管理者 PIN 不能簽到、回報、排班
+// 組員／組長專用功能：管理者和唯讀角色不能簽到、回報、排班
 function user_(code) {
   var u = auth_(code);
-  if (u.role === '管理者' || u.role === '前賢') throw new Error(u.role + '帳號不能使用這個功能');
+  if (u.role !== '組員' && u.role !== '組長') throw new Error(u.role + '帳號不能使用這個功能');
   return u.name;
 }
 
@@ -894,7 +1101,7 @@ function setup() {
   // 人員分頁「角色」欄的下拉選單要包含所有角色，否則寫入組長／前賢會被拒
   var uSh = sheet_('users');
   uSh.getRange(2, 4, Math.max(uSh.getMaxRows() - 1, 1), 1).setDataValidation(
-    SpreadsheetApp.newDataValidation().requireValueInList(['員工', '組長', '前賢', '管理者'], true).setAllowInvalid(false).build());
+    SpreadsheetApp.newDataValidation().requireValueInList(ROLES, true).setAllowInvalid(false).build());
   var ss = sheet_('settings'), have = {};
   if (ss.getLastRow() > 1) ss.getRange(2, 1, ss.getLastRow() - 1, 1).getDisplayValues().forEach(function (r) { have[r[0]] = true; });
   SETTINGS.forEach(function (x) { if (!have[x[0]]) ss.appendRow([x[0], "'" + x[1], x[2]]); });
