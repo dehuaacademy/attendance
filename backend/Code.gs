@@ -1,5 +1,5 @@
 /**
- * 德化宮 廟務總管小組｜簽到退＋回報＋自選排班＋管理者介面 後台（v4.1）
+ * 德化宮 廟務總管小組｜簽到退＋回報＋自選排班＋管理者介面＋App 推播與公告 後台（v5）
  * 這份程式碼放在公開的 GitHub（dehuaacademy/attendance/backend），不可寫入任何密碼或頻道名稱。
  * 更新方式：推到 GitHub 後，由獨立的「德化更新器」自動安裝並更新部署（見維護說明）。
  * 綁定在試算表「德化 廟務打卡紀錄」上，部署成網頁應用程式，只回傳資料（JSON），不負責畫面。
@@ -13,12 +13,14 @@
  *   打卡紀錄 系統自動寫入
  *   回報     事務回報，系統自動寫入（照片存雲端硬碟，這裡放連結）
  *   住廟回報 每位住廟者一列：送出日期｜回報人｜區域｜姓名（送出日期即住廟日期）
+ *   推播裝置 每支開啟通知的手機一列（App 自動登記；失效的會標示，不用手動整理）
+ *   公告     管理者在 App 發的公告
  *   統計     每天自動更新（也可從選單「德化打卡 → 更新統計」手動更新），不在 App 顯示
  *
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '4.1';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.0';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -35,7 +37,12 @@ var CONFIG = {
   // 推播通知（ntfy）：頻道名稱等同密碼，存在「設定」分頁的「ntfy頻道」列，不寫在程式碼裡
   NOTIFY_REPORT_KINDS: ['異常回報'],  // 哪些回報類型要推播
   AREAS: ['北一區', '北二區', '桃竹苗', '中區', '南區'],   // 住廟回報的區域選項
-  STAY_MAX_ROWS: 30
+  STAY_MAX_ROWS: 30,
+  // App 推播（Firebase Cloud Messaging）。專案 ID 不是密碼，可以放這裡
+  FCM_PROJECT_ID: 'dehua-temple-managers-ap-ab58a',
+  APP_URL: 'https://dehuaacademy.github.io/attendance/',
+  NEWS_DAYS: 60,              // App 顯示幾天內的公告
+  NEWS_MAX: 20
 };
 
 var SHEETS = {
@@ -46,6 +53,8 @@ var SHEETS = {
   clock:    { name: '打卡紀錄', header: ['日期', '時間', '姓名', '類型', '是否在範圍內', '距離(公尺)', '緯度', '經度', '定位精確度(公尺)', '伺服器時間戳記'] },
   report:   { name: '回報',     header: ['送出日期', '送出時間', '回報日期', '姓名', '類型', '內容', '照片1', '照片2', '照片3', '伺服器時間戳記'] },
   stay:     { name: '住廟回報', header: ['送出日期', '送出時間', '回報人', '區域', '姓名', '伺服器時間戳記'] },
+  devices:  { name: '推播裝置', header: ['Token', '姓名', '角色', '裝置', '登記時間', '最後更新', '狀態'] },
+  news:     { name: '公告',     header: ['時間', '發布者', '標題', '內容', '送達手機數'] },
   stats:    { name: '統計',     header: ['月份', '姓名', '排班天數', '出勤天數', '實際出勤時數', '缺簽退天數', '更新時間'] }
 };
 
@@ -57,7 +66,8 @@ var SETTINGS = [
   ['推播：簽到簽退', '是',  '是／否'],
   ['推播：異常回報', '是',  '是／否'],
   ['推播：排班異動', '是',  '是／否'],
-  ['推播：缺人檢查', '是',  '是／否（每天 8 點檢查未來 7 天）']
+  ['推播：缺人檢查', '是',  '是／否（每天 8 點檢查未來 7 天；管理者和同仁都會收到）'],
+  ['推播：ntfy',     '是',  '是／否（舊的 ntfy 通知；App 推播穩定後可以關掉）']
 ];
 var _cfg = null;
 function cfg_() {
@@ -77,6 +87,7 @@ function cfg_() {
     nReport: map['推播：異常回報'] !== '否',
     nShift: map['推播：排班異動'] !== '否',
     nGap: map['推播：缺人檢查'] !== '否',
+    nNtfy: map['推播：ntfy'] !== '否',
     ntfy: String(map['ntfy頻道'] || '').trim()
   };
   return _cfg;
@@ -100,6 +111,7 @@ function doPost(e) {
     if (body.action === 'shift')  return shift_(body);
     if (body.action === 'stay')   return stay_(body);
     if (body.action === 'admin')  return admin_(body);
+    if (body.action === 'push')   return push_(body);
     throw new Error('未知的操作');
   });
 }
@@ -134,6 +146,7 @@ function status_(code) {
 
   res.days = cfg_().days;
   res.areas = cfg_().areas;
+  res.news = news_(CONFIG.NEWS_MAX);
   res.schedule = shifts_(today, day_(cfg_().days - 1)).map(function (s) {
     return { date: s.date, name: s.name, start: s.start, end: s.end, note: s.note };
   });
@@ -256,7 +269,7 @@ function dailyCheck() {
     var d = day_(i);
     if (!taken[d]) gaps.push(d.slice(5).replace('-', '/') + '（' + '日一二三四五六'.charAt(dow_(d)) + '）');
   }
-  if (gaps.length && cfg_().nGap) notify_('⚠️ 未來 ' + CONFIG.GAP_CHECK_DAYS + ' 天有 ' + gaps.length + ' 天沒人排班', gaps.join('、'), 4);
+  if (gaps.length && cfg_().nGap) notify_('⚠️ 未來 ' + CONFIG.GAP_CHECK_DAYS + ' 天有 ' + gaps.length + ' 天沒人排班', gaps.join('、') + '\n打開 App「班表」就能登記', 4, 'all');
   updateStats();
 }
 
@@ -435,6 +448,16 @@ function admin_(b) {
       log_(me.name, '修改設定', changed.join('；'));
       return { ok2: true };
     }
+
+    if (op === 'announce') {
+      var title = String(b.title || '').trim(), body = String(b.body || '').trim();
+      if (!title || title.length > 40) throw new Error('標題請填 1–40 字');
+      if (body.length > 1000) throw new Error('內容最多 1000 字');
+      var res = fcm_(devices_('員工'), '📢 ' + title, body || title, 'news');
+      sheet_('news').appendRow(["'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm'), me.name, title, body, res.sent]);
+      log_(me.name, '發公告', title + '（送達 ' + res.sent + ' 支手機）');
+      return { sent: res.sent, error: res.error || '' };
+    }
     throw new Error('未知的管理操作');
   } finally { lock.releaseLock(); }
 }
@@ -471,7 +494,8 @@ function overview_(today) {
   return {
     today: today, days: c.days, users: users, clock: clock,
     schedule: shifts_(today, day_(c.days - 1)).map(function (s) { return { date: s.date, name: s.name, start: s.start, end: s.end, note: s.note }; }),
-    reports: reports, stays: stays, settings: settings
+    reports: reports, stays: stays, settings: settings,
+    news: news_(CONFIG.NEWS_MAX), devices: deviceCount_()
   };
 }
 
@@ -496,23 +520,114 @@ function log_(who, action, detail) {
   try { sheet_('oplog').appendRow(["'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm:ss'), who, action, detail]); } catch (e) {}
 }
 
-// ===== 推播通知：先送 ntfy，失敗就改寄 Email 給部署者；通知失敗不影響打卡 =====
-function notify_(title, message, priority) {
+// ===== 推播通知 =====
+// audience：'admin'（預設，只推管理者）、'all'（管理者＋同仁）
+// App 推播（FCM）和 ntfy 並行；兩種都沒送到管理者時改寄 Email。通知失敗不影響打卡
+function notify_(title, message, priority, audience) {
+  var c = cfg_(), toAdmin = 0, ntfyOk = false;
   try {
-    var topic = cfg_().ntfy;
-    if (!topic) throw new Error('「設定」分頁沒有 ntfy頻道');
-    var r = UrlFetchApp.fetch('https://ntfy.sh/', {
-      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-      payload: JSON.stringify({ topic: topic, title: title, message: message, priority: priority || 3 })
-    });
-    if (r.getResponseCode() < 300) return;
-    throw new Error('ntfy ' + r.getResponseCode());
-  } catch (err) {
+    var list = devices_(audience === 'all' ? null : '管理者');
+    var r = fcm_(list, title, message, audience === 'all' ? 'all' : 'admin');
+    toAdmin = r.sentAdmin;
+  } catch (e) { /* App 推播失敗，靠 ntfy／Email */ }
+  if (c.nNtfy && c.ntfy) {
+    try {
+      var n = UrlFetchApp.fetch('https://ntfy.sh/', {
+        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        payload: JSON.stringify({ topic: c.ntfy, title: title, message: message, priority: priority || 3 })
+      });
+      ntfyOk = n.getResponseCode() < 300;
+    } catch (e) {}
+  }
+  if (!toAdmin && !ntfyOk) {
     try {
       MailApp.sendEmail(Session.getEffectiveUser().getEmail(), '[德化打卡] ' + title,
-                        message + '\n\n（推播失敗，改用 Email 通知：' + err.message + '）');
-    } catch (e) { /* 兩種都失敗就放棄，紀錄已寫入試算表 */ }
+                        message + '\n\n（App 推播與 ntfy 都沒有送達，改用 Email 通知）');
+    } catch (e) {}
   }
+}
+
+// 推播裝置：[{row, token, name, role}]，只取狀態「有效」；role 為 null 時全部
+function devices_(role) {
+  var sh = sheet_('devices'), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  return sh.getRange(2, 1, n, 7).getDisplayValues().map(function (r, i) {
+    return { row: i + 2, token: r[0], name: r[1], role: r[2], status: r[6] };
+  }).filter(function (d) { return d.token && d.status === '有效' && (!role || d.role === role); });
+}
+function deviceCount_() {
+  var out = {};
+  devices_(null).forEach(function (d) { out[d.name] = (out[d.name] || 0) + 1; });
+  return out;
+}
+
+// 送 FCM 推播。回傳 {sent, sentAdmin, error}；失效的 Token 自動標示「已失效」
+function fcm_(list, title, body, tag) {
+  if (!list.length) return { sent: 0, sentAdmin: 0 };
+  var url = 'https://fcm.googleapis.com/v1/projects/' + CONFIG.FCM_PROJECT_ID + '/messages:send';
+  var auth = 'Bearer ' + ScriptApp.getOAuthToken();
+  var reqs = list.map(function (d) {
+    return {
+      url: url, method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { Authorization: auth },
+      payload: JSON.stringify({ message: {
+        token: d.token,
+        notification: { title: title, body: body },
+        data: { tag: tag || '' },
+        webpush: {
+          notification: { icon: CONFIG.APP_URL + 'icon-192.png', badge: CONFIG.APP_URL + 'icon-192.png' },
+          fcm_options: { link: CONFIG.APP_URL }
+        }
+      } })
+    };
+  });
+  var res = UrlFetchApp.fetchAll(reqs), sent = 0, sentAdmin = 0, error = '', dead = [];
+  res.forEach(function (r, i) {
+    var code = r.getResponseCode();
+    if (code < 300) { sent++; if (list[i].role === '管理者') sentAdmin++; return; }
+    var t = r.getContentText();
+    if (code === 404 || /UNREGISTERED|registration-token-not-registered|INVALID_ARGUMENT.*token|not a valid FCM registration token/i.test(t)) { if (list[i].row) dead.push(list[i].row); }
+    else error = 'FCM ' + code + '：' + t.slice(0, 200);
+  });
+  if (dead.length) {
+    var sh = sheet_('devices');
+    dead.forEach(function (row) { sh.getRange(row, 7).setValue('已失效'); });
+  }
+  return { sent: sent, sentAdmin: sentAdmin, error: error };
+}
+
+// App 登記／移除推播裝置、送測試通知（管理者與員工都可以）
+function push_(b) {
+  var who = auth_(b.u), token = String(b.token || '').trim();
+  if (!/^[\w:\-]{20,4096}$/.test(token)) throw new Error('推播代碼不正確');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = sheet_('devices'), n = sh.getLastRow() - 1, row = 0, now = "'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm:ss');
+    if (n > 0) sh.getRange(2, 1, n, 1).getDisplayValues().forEach(function (r, i) { if (r[0] === token) row = i + 2; });
+    if (b.op === 'remove') {
+      if (row) sh.getRange(row, 7).setValue('已登出');
+      return { removed: !!row };
+    }
+    var dev = String(b.device || '').slice(0, 60);
+    if (row) { sh.getRange(row, 2, 1, 3).setValues([[who.name, who.role, dev]]); sh.getRange(row, 6, 1, 2).setValues([[now, '有效']]); }
+    else sh.appendRow([token, who.name, who.role, dev, now, now, '有效']);
+  } finally { lock.releaseLock(); }
+  if (b.op === 'test') {
+    var r = fcm_([{ token: token, role: who.role, row: 0 }], '✅ 德化打卡通知已開啟', who.name + '，之後的' + (who.role === '管理者' ? '通知' : '公告和缺人提醒') + '會顯示在這裡', 'test');
+    if (!r.sent) throw new Error('已登記，但測試通知沒送出：' + (r.error || '請稍後再試'));
+  }
+  return { registered: true };
+}
+
+// 最近的公告（新的在前）
+function news_(max) {
+  var sh = sheet_('news'), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  var s0 = Math.max(2, sh.getLastRow() - max + 1), since = day_(-CONFIG.NEWS_DAYS);
+  return sh.getRange(s0, 1, sh.getLastRow() - s0 + 1, 4).getDisplayValues().reverse()
+    .filter(function (r) { return r[2] && String(r[0]).slice(0, 10) >= since; })
+    .map(function (r) { return { time: String(r[0]).replace(/^'/, ''), by: r[1], title: r[2], body: r[3] }; });
 }
 
 // ===== 工具 =====
