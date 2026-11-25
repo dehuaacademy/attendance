@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.9';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.0';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -181,6 +181,7 @@ function doPost(e) {
     if (body.action === 'photo')  return photo_(body);
     if (body.action === 'thumbs') return thumbs_(body);
     if (body.action === 'cash')   return cash_(body);
+    if (body.action === 'me')     return me_(body);
     throw new Error('未知的操作');
   });
 }
@@ -442,6 +443,7 @@ function admin_(b) {
     if (op === 'addUser') {
       var name = String(b.name || '').trim();
       if (!name || name.length > 20) throw new Error('請輸入姓名');
+      if (/[|｜]/.test(name)) throw new Error('姓名不能有「|」');
       if (users_().some(function (u) { return u.name === name; })) throw new Error('已經有「' + name + '」了');
       var pin = newPin_(b.pin);
       var nrole = VIEW_ROLES.indexOf(b.role) >= 0 ? b.role : '組員';
@@ -470,18 +472,18 @@ function admin_(b) {
     if (op === 'adminPin') {
       var np = String(b.pin || '').trim();
       if (!/^\d{6}$/.test(np)) throw new Error('管理者 PIN 要 6 位數字');
-      if (users_().some(function (u) { return u.pin === np && u.row !== me.row; })) throw new Error('這組 PIN 已經有人用了');
+      checkPin_(np);
       bust_(['users']);
       sheet_('users').getRange(me.row, 1).setValue("'" + np);
       log_(me.name, '更換管理者 PIN', '');
-      return { pin: np };
+      return { pin: np, name: me.name };
     }
 
     if (op === 'setPin') {
       if (target.role === '管理者' && !b.pin) throw new Error('管理者 PIN 請自行指定 6 位數');
       if (target.role === '管理者' && b.pin && !/^\d{6}$/.test(b.pin)) throw new Error('管理者 PIN 要 6 位數');
-      var p = target.role === '管理者' ? String(b.pin || '') : newPin_(b.pin, target.row);
-      if (target.role === '管理者' && users_().some(function (u) { return u.pin === p && u.row !== target.row; })) throw new Error('這組 PIN 已經有人用了');
+      var p = target.role === '管理者' ? String(b.pin || '') : newPin_(b.pin);
+      if (target.role === '管理者') checkPin_(p);
       bust_(['users']);
       sheet_('users').getRange(target.row, 1).setValue("'" + p);
       log_(me.name, '更換 PIN', target.name);
@@ -608,21 +610,40 @@ function overview_(today, mode) {
   };
 }
 
-// 產生或檢查 4 位數 PIN（不重複、不用 0000 / 1234 這類）
-function newPin_(want, selfRow) {
-  var used = {};
-  users_().forEach(function (u) { if (u.row !== selfRow) used[u.pin] = true; });
+// 產生或檢查 4 位數 PIN。v6.0 起登入要「姓名＋PIN」，所以 PIN 可以和別人重複（也不能檢查重複，否則等於洩漏別人的 PIN）
+function newPin_(want) {
   want = String(want || '').trim();
   if (want) {
     if (!/^\d{4}$/.test(want)) throw new Error('PIN 要 4 位數字');
-    if (used[want]) throw new Error('這組 PIN 已經有人用了');
-    return want;
+    return checkPin_(want);
   }
   for (var i = 0; i < 200; i++) {
     var p = ('000' + Math.floor(Math.random() * 10000)).slice(-4);
-    if (!used[p] && new Set(p.split('')).size > 2 && '0123456789'.indexOf(p) < 0 && '9876543210'.indexOf(p) < 0) return p;
+    if (!weakPin_(p) && new Set(p.split('')).size > 2) return p;
   }
   throw new Error('無法產生 PIN，請手動指定');
+}
+// 太好猜的 PIN：全部同一個數字、連號（1234、9876、123456…）
+function weakPin_(p) { return /^(\d)\1+$/.test(p) || '01234567890'.indexOf(p) >= 0 || '09876543210'.indexOf(p) >= 0; }
+function checkPin_(p) { if (weakPin_(p)) throw new Error('這組 PIN 太好猜（同一個數字或連號），請換一組'); return p; }
+
+// 自己改 PIN（前賢是共用帳號，只能由管理者改）
+function me_(b) {
+  var who = auth_(b.u);
+  if (b.op !== 'pin') throw new Error('未知的操作');
+  if (who.role === '前賢') throw new Error('前賢是共用帳號，請管理者更改 PIN');
+  var p = String(b.pin || '').trim(), len = who.role === '管理者' ? 6 : 4;
+  if (!new RegExp('^\\d{' + len + '}$').test(p)) throw new Error('PIN 要 ' + len + ' 位數字');
+  checkPin_(p);
+  if (p === who.pin) throw new Error('和原本的 PIN 一樣');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    bust_(['users']);
+    sheet_('users').getRange(who.row, 1).setValue("'" + p);
+    log_(who.name, '自己更換 PIN', '');
+  } finally { lock.releaseLock(); }
+  return { name: who.name, pin: p };
 }
 function hhmmIn_(s) { var m = String(s || '').match(/^(\d{1,2}):(\d{2})$/); return m && +m[1] < 24 && +m[2] < 60 ? ('0' + m[1]).slice(-2) + ':' + m[2] : ''; }
 function log_(who, action, detail) {
@@ -1017,13 +1038,23 @@ function readUsers_() {
     return { row: i + 2, pin: String(r[0]).trim(), name: String(r[1]).trim(), enabled: r[2] !== '否', role: ROLES.indexOf(r[3]) >= 0 ? r[3] : '組員' };
   }).filter(function (u) { return u.name; });
 }
+// 登入身分：「姓名|PIN」（v6.0 起）。同一個姓名連續錯 5 次鎖 15 分鐘
+// 舊版只有 PIN：已登入的手機打開 App 後會自動換成「姓名|PIN」；PIN 和別人重複時就要重新登入。
+// 舊版路徑整體錯 30 次也鎖 15 分鐘，避免被拿來猜 PIN
+var AUTH_TRIES = 5, AUTH_LEGACY_TRIES = 30, AUTH_LOCK_SEC = 900;
 function auth_(code) {
   code = String(code || '').trim();
-  if (code) {
-    var u = users_().filter(function (x) { return x.pin === code && x.enabled; })[0];
-    if (u) return u;
+  var i = code.lastIndexOf('|'), legacy = i < 0;
+  var name = legacy ? '' : code.slice(0, i).trim(), pin = legacy ? code : code.slice(i + 1).trim();
+  var c = CacheService.getScriptCache(), key = 'lk_' + (legacy ? '_legacy' : name), n = 0;
+  try { n = Number(c.get(key)) || 0; } catch (e) {}
+  if (n >= (legacy ? AUTH_LEGACY_TRIES : AUTH_TRIES)) throw new Error('輸入錯誤太多次，請 15 分鐘後再輸入姓名和 PIN');
+  if (pin) {
+    var m = users_().filter(function (x) { return x.enabled && x.pin === pin && (legacy || x.name === name); });
+    if (m.length === 1) { if (n) try { c.remove(key); } catch (e) {} return m[0]; }
   }
-  throw new Error('PIN 錯誤或已停用');
+  try { c.put(key, String(n + 1), AUTH_LOCK_SEC); } catch (e) {}
+  throw new Error(legacy ? 'PIN 錯誤或已停用，請輸入姓名和 PIN 重新登入' : '姓名或 PIN 錯誤，或帳號已停用');
 }
 // 組員／組長專用功能：管理者和唯讀角色不能簽到、回報、排班
 function user_(code) {
