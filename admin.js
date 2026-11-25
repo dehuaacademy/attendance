@@ -57,6 +57,35 @@ function adPhoto(url) {
     PHOTOS[id] = 'data:' + r.mime + ';base64,' + r.data; show(PHOTOS[id]);
   }).catch(function (e) { $('lbMsg').textContent = e.message === 'Failed to fetch' ? '網路異常，請再試一次' : e.message; });
 }
+// 縮圖：先畫出灰色方塊，再一次向後台要這一頁所有縮圖；拿不到縮圖的改顯示「📷 照片」
+var THUMBS = {}, thumbBusy = false;
+function photoId(url) { var m = String(url).match(/\/d\/([-\w]{20,})/); return m ? m[1] : ''; }
+function thumbHtml(p, i) {
+  var id = photoId(p), src = THUMBS[id];
+  var click = ' onclick="adPhoto(\'' + esc(p) + '\')"';
+  if (src) return '<img class="th" src="' + src + '" alt="照片 ' + (i + 1) + '"' + click + '>';
+  if (id && src === undefined) return '<span class="th ld" data-th="' + id + '"' + click + '></span>';
+  return '<button class="sb"' + click + '>📷 照片 ' + (i + 1) + '</button>';
+}
+function loadThumbs() {
+  if (thumbBusy) return;
+  var els = document.querySelectorAll('[data-th]'), ids = [];
+  for (var i = 0; i < els.length; i++) { var id = els[i].getAttribute('data-th'); if (ids.indexOf(id) < 0 && THUMBS[id] === undefined) ids.push(id); }
+  if (!ids.length) return;
+  thumbBusy = true; var who = CODE;
+  apiPost({ action: 'thumbs', u: CODE, ids: ids.slice(0, 30) }).then(function (r) {
+    thumbBusy = false; if (CODE !== who) return;
+    ids.slice(0, 30).forEach(function (id) { THUMBS[id] = (r.map || {})[id] || ''; });
+    var nodes = document.querySelectorAll('[data-th]');
+    for (var j = 0; j < nodes.length; j++) {
+      var n = nodes[j], id = n.getAttribute('data-th'), src = THUMBS[id];
+      if (src === undefined) continue;
+      if (src) { var im = document.createElement('img'); im.className = 'th'; im.src = src; im.onclick = n.onclick; n.parentNode.replaceChild(im, n); }
+      else { n.removeAttribute('data-th'); n.className = 'sb'; n.textContent = '📷 照片'; }
+    }
+    loadThumbs();                                   // 超過 30 張時再要下一批
+  }).catch(function () { thumbBusy = false; });
+}
 function closePhoto() { $('lightbox').classList.add('hide'); }
 function adm(op, extra) {
   var body = { action: 'admin', u: CODE, op: op };
@@ -95,6 +124,7 @@ function adRender() {
   if (adTab === 'news') h = adNews();
   if (adTab === 'settings') h = adSettings();
   $(HOST.body).innerHTML = h;
+  loadThumbs();
 }
 
 // ---- 人員 ----
@@ -222,7 +252,7 @@ function adLog() {
   AD.reports.forEach(function (r) {
     h += '<div class="rep"><div><b>' + esc(r.name) + '</b> <span class="kind' + (r.kind === '異常回報' ? ' bad' : '') + '">' + esc(r.kind) + '</span><small>' + esc(r.date) + ' ' + esc(r.time) + '</small></div>'
        + '<p>' + esc(r.text) + '</p>'
-       + (r.photos.length ? '<div class="pl">' + r.photos.map(function (p, i) { return '<button class="sb" onclick="adPhoto(\'' + esc(p) + '\')">📷 照片 ' + (i + 1) + '</button>'; }).join(' ') + '</div>' : '') + '</div>';
+       + (r.photos.length ? '<div class="pl">' + r.photos.map(thumbHtml).join('') + '</div>' : '') + '</div>';
   });
   h += '</div><div class="card"><h3 class="ah">最近的住廟回報</h3>' + (AD.stays.length ? '' : '<div class="empty">還沒有住廟回報</div>');
   var cur = '';
