@@ -21,7 +21,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.7';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.8';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -159,6 +159,7 @@ function doPost(e) {
     if (body.action === 'admin')  return admin_(body);
     if (body.action === 'push')   return push_(body);
     if (body.action === 'photo')  return photo_(body);
+    if (body.action === 'thumbs') return thumbs_(body);
     throw new Error('未知的操作');
   });
 }
@@ -737,15 +738,49 @@ function photoIds_() {
     return ids;
   });
 }
+var PHOTO_ROLES = ['管理者', '組長', '前賢'];
 function photo_(b) {
   var who = auth_(b.u);
-  if (['管理者', '組長', '前賢'].indexOf(who.role) < 0) throw new Error('沒有權限看照片');
+  if (PHOTO_ROLES.indexOf(who.role) < 0) throw new Error('沒有權限看照片');
   var id = String(b.id || '');
   if (!/^[-\w]{20,}$/.test(id) || !photoIds_()[id]) throw new Error('找不到這張照片');
   var blob = DriveApp.getFileById(id).getBlob();
   var bytes = blob.getBytes();
   if (bytes.length > 4000000) throw new Error('照片太大，請到雲端硬碟查看');
   return { mime: blob.getContentType() || 'image/jpeg', data: Utilities.base64Encode(bytes) };
+}
+
+// 縮圖：一次最多 30 張，用 Drive 產生的縮圖（約 320px，每張幾十 KB），快取 6 小時
+// 剛上傳的照片 Drive 可能還沒做好縮圖，這時回傳空字串，前台改顯示按鈕，下次再試
+function thumbs_(b) {
+  var who = auth_(b.u);
+  if (PHOTO_ROLES.indexOf(who.role) < 0) throw new Error('沒有權限看照片');
+  var ok = photoIds_(), ids = (b.ids || []).map(String).filter(function (id) { return /^[-\w]{20,}$/.test(id) && ok[id]; }).slice(0, 30);
+  var map = {}, c = CacheService.getScriptCache(), got = {};
+  if (!ids.length) return { map: map };
+  try { got = c.getAll(ids.map(function (id) { return 'th_' + id; })) || {}; } catch (e) {}
+  var miss = ids.filter(function (id) { if (got['th_' + id]) { map[id] = got['th_' + id]; return false; } return true; });
+  if (!miss.length) return { map: map };
+  var h = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  var meta = UrlFetchApp.fetchAll(miss.map(function (id) {
+    return { url: 'https://www.googleapis.com/drive/v3/files/' + id + '?fields=thumbnailLink', headers: h, muteHttpExceptions: true };
+  }));
+  var links = [], lid = [];
+  meta.forEach(function (r, i) {
+    var t = ''; try { t = JSON.parse(r.getContentText()).thumbnailLink || ''; } catch (e) {}
+    if (t) { links.push({ url: t.replace(/=s\d+$/, '') + '=s320', headers: h, muteHttpExceptions: true }); lid.push(miss[i]); }
+    else map[miss[i]] = '';
+  });
+  var put = {};
+  if (links.length) UrlFetchApp.fetchAll(links).forEach(function (r, i) {
+    var id = lid[i];
+    if (r.getResponseCode() !== 200) { map[id] = ''; return; }
+    var bl = r.getBlob(), d = 'data:' + (bl.getContentType() || 'image/jpeg') + ';base64,' + Utilities.base64Encode(bl.getBytes());
+    map[id] = d.length < 90000 ? d : '';
+    if (map[id]) put['th_' + id] = d;
+  });
+  try { if (Object.keys(put).length) c.putAll(put, 21600); } catch (e) {}
+  return { map: map };
 }
 
 // 最近的公告（新的在前）
