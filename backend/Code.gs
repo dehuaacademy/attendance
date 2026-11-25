@@ -20,7 +20,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '5.1';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '5.2';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -88,7 +88,8 @@ function cfg_() {
     nShift: map['推播：排班異動'] !== '否',
     nGap: map['推播：缺人檢查'] !== '否',
     nNtfy: map['推播：ntfy'] !== '否',
-    ntfy: String(map['ntfy頻道'] || '').trim()
+    ntfy: String(map['ntfy頻道'] || '').trim(),
+    mailTo: String(map['備援Email'] || '').trim()
   };
   return _cfg;
 }
@@ -547,8 +548,10 @@ function notify_(title, message, priority, audience) {
   }
   if (!toAdmin && !ntfyOk) {
     try {
-      MailApp.sendEmail(Session.getEffectiveUser().getEmail(), '[德化打卡] ' + title,
-                        message + '\n\n（App 推播與 ntfy 都沒有送達，改用 Email 通知）');
+      // 主旨固定，讓 Gmail 歸在同一串，不會一直冒出新信
+      MailApp.sendEmail(c.mailTo || Session.getEffectiveUser().getEmail(), '[德化打卡] 推播未送達紀錄',
+                        fmt_(new Date(), 'yyyy-MM-dd HH:mm') + '\n' + title + '\n' + message
+                        + '\n\n（管理者手機沒有收到 App 推播時，才會寄這封備份）');
       rep.mail = '已寄出';
     } catch (e) { rep.mail = '錯誤：' + e.message; }
   }
