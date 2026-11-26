@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '6.3';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.4';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -63,6 +63,7 @@ var SHEETS = {
   cash:     { name: '零用金',   header: ['編號', '建立時間', '日期', '類型', '金額', '科目', '說明', '經手人', '收據1', '收據2', '收據3', '狀態', '核准金額', '核准人', '核准時間', '核對人', '核對時間', '還款時間', '備註', '請購單號'] },
   preq:     { name: '請購',     header: ['編號', '建立時間', '申請人', '品項', '說明', '預估金額', '科目', '報價1', '報價2', '報價3', '單一報價理由', '報修單號', '狀態', '核准人', '核准時間', '備註', '記帳編號'] },
   locs:     { name: '報修地點', header: ['大項', '小區域'] },
+  fest:     { name: '節日',     header: ['日期', '農曆', '節日', '類型', '禮節', '備註'] },
   repairs:  { name: '報修',     header: ['編號', '建立時間', '回報人', '地點', '狀況', '緊急', '照片1', '照片2', '照片3', '狀態', '處理人', '更新時間', '處理說明', '請購單號'] },
   stats:    { name: '統計',     header: ['月份', '姓名', '排班天數', '出勤天數', '實際出勤時數', '缺簽退天數', '更新時間'] }
 };
@@ -78,6 +79,7 @@ var SETTINGS = [
   ['推播：缺人檢查', '是',  '是／否（每天 8 點檢查未來 7 天；管理者和同仁都會收到）'],
   ['推播：ntfy',     '是',  '是／否（舊的 ntfy 通知；App 推播穩定後可以關掉）'],
   ['推播：零用金',   '是',  '是／否（請購、支出、撥款、低餘額通知）'],
+  ['推播：節日',     '是',  '是／否（初一十五前 2 天、聖誕成道前 3 天、老母大典／冬至／中元／班程前 7 天提醒組長和管理者）'],
   ['推播：報修',     '是',  '是／否（新報修通知組長和管理者；緊急的也通知執行長；完成時通知回報人）'],
   ['零用金科目',     '香燭供品,供果供品,食材,餐點,清潔用品,文具,水電修繕,設備,住宿寢具,佛具,活動班程,印刷文宣,交通,雜支', '用逗號分隔'],
   ['零用金核准門檻(元)', '5000', '支出或代墊超過這個金額，要先開請購單，執行長核准後才能記帳'],
@@ -89,14 +91,14 @@ var _cfg = null;
 // ===== 角色 =====
 var ROLES = ['組員', '組長', '前賢', '執行長', '財務', '管理者'];
 var VIEW_ROLES = ['前賢', '執行長', '財務'];     // 唯讀看出勤（排班、回報、公告）
-var PUSH_DESC = { '組員': '公告、缺人提醒和報修結果', '組長': '簽到退、異常回報、缺人提醒、報修、財務和公告', '前賢': '公告和異常回報',
-                  '執行長': '公告、請購核准和緊急報修', '財務': '公告和財務', '管理者': '簽到退、異常回報、缺人提醒、報修和財務' };
+var PUSH_DESC = { '組員': '公告、缺人提醒和報修結果', '組長': '簽到退、異常回報、缺人提醒、節日、報修、財務和公告', '前賢': '公告和異常回報',
+                  '執行長': '公告、請購核准和緊急報修', '財務': '公告和財務', '管理者': '簽到退、異常回報、缺人提醒、節日、報修和財務' };
 
 // ===== 快取：讀試算表很慢（每次 0.2–0.5 秒），常用資料放在 Script Cache 最多 10 分鐘 =====
 // App 裡任何寫入都會立刻清掉相關快取；直接改試算表會由 onEdit 清掉全部快取
 var CACHE_TTL = 600;
 var CK = { users: 'c_users', settings: 'c_settings', shifts: 'c_shifts_', news: 'c_news_', clock: 'c_clock_',
-           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash', preq: 'c_preq', repairs: 'c_repairs', locs: 'c_locs', chkItems: 'c_chkitems', chk: 'c_chk_' };   // 結尾是 _ 的會加上今天日期
+           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash', preq: 'c_preq', repairs: 'c_repairs', locs: 'c_locs', fest: 'c_fest', chkItems: 'c_chkitems', chk: 'c_chk_' };   // 結尾是 _ 的會加上今天日期
 var _users = null, _bustKeys = [];
 function cache_(key, loader) {
   var c = CacheService.getScriptCache(), v = null;
@@ -158,6 +160,7 @@ function cfg_() {
     mailTo: String(map['備援Email'] || '').trim(),
     nCash: map['推播：零用金'] !== '否',
     nRepair: map['推播：報修'] !== '否',
+    nFest: map['推播：節日'] !== '否',
     cashCats: splitList_(map['零用金科目']),
     cashLimit: Number(map['零用金核准門檻(元)']) || 5000,
     cashExempt: splitList_(map['免核准科目']),
@@ -225,6 +228,7 @@ function status_(code) {
   res.days = cfg_().days;
   res.areas = cfg_().areas;
   res.news = news_(CONFIG.NEWS_MAX);
+  res.fest = festSoon_(cfg_().days);
   res.schedule = shifts_(today, day_(cfg_().days - 1)).map(function (s) {
     return { date: s.date, name: s.name, start: s.start, end: s.end, note: s.note };
   });
@@ -454,6 +458,7 @@ function dailyCheck() {
     var d = day_(i);
     if (!taken[d]) gaps.push(d.slice(5).replace('-', '/') + '（' + '日一二三四五六'.charAt(dow_(d)) + '）');
   }
+  try { festCheck_(); } catch (e) {}
   if (gaps.length && cfg_().nGap) notify_('⚠️ 未來 ' + CONFIG.GAP_CHECK_DAYS + ' 天有 ' + gaps.length + ' 天沒人排班', gaps.join('、') + '\n打開 App「班表」就能登記', 4, 'all');
   updateStats();
 }
@@ -682,6 +687,61 @@ function admin_(b) {
   } finally { lock.releaseLock(); }
 }
 
+// ===== 節日提醒：「節日」分頁一列一天（同一天多個節日用「、」併在一起）=====
+// 類型：初一十五、聖誕成道、老母大典、冬至、中元、班程（班程等臨時活動可以直接在分頁加一列）
+var FEST_LEAD = { '初一十五': 2, '聖誕成道': 3, '老母大典': 7, '冬至': 7, '中元': 7, '班程': 7 };
+var FEST_PREP = {
+  '初一十五': '供果 56 盤（無極宮15、德化宮15、會議室5、彌勒院11、仙德樓5、祖師祠5）、素料 5 盤、先人 2 大盤',
+  '聖誕成道': '確認供果 5 盤',
+  '老母大典': '供果、壽桃、素料、蘭花',
+  '冬至': '湯圓約 10 斤（50 碗＋3 小鍋）',
+  '中元': '普渡供品',
+  '班程': ''
+};
+function festAll_() {
+  return cache_(CK.fest, function () {
+    var sh = sheet_('fest'), n = sh.getLastRow() - 1;
+    if (n < 1) return [];
+    return sh.getRange(2, 1, n, 6).getDisplayValues().map(function (r) {
+      var types = String(r[3]).split(/[、,，]/).map(function (t) { return t.trim(); }).filter(String);
+      return { date: normDate_(r[0]), lunar: String(r[1]).trim(), name: String(r[2]).trim(), types: types, rite: String(r[4]).trim(), note: String(r[5]).trim() };
+    }).filter(function (x) { return x.date && x.name; });
+  });
+}
+function festPrep_(x) {
+  var p = x.types.map(function (t) { return FEST_PREP[t] || ''; }).filter(String);
+  if (x.note) p.push(x.note);
+  return p.join('；');
+}
+// 今天起 days 天內的節日（App 顯示用）
+function festSoon_(days) {
+  var from = day_(0), to = day_(Math.min(days || 60, 90) - 1);
+  return festAll_().filter(function (x) { return x.date >= from && x.date <= to; })
+    .sort(function (a, b) { return a.date < b.date ? -1 : 1; })
+    .map(function (x) {
+      var lead = Math.max.apply(null, x.types.map(function (t) { return FEST_LEAD[t] || 3; }).concat([0]));
+      return { date: x.date, lunar: x.lunar, name: x.name, types: x.types, rite: x.rite, prep: festPrep_(x), lead: lead };
+    });
+}
+// 每天 8 點：剛好到提醒天數的節日推播給組長、管理者
+function festCheck_() {
+  if (!cfg_().nFest) return;
+  var all = festAll_(), msgs = [];
+  for (var i = 1; i <= 7; i++) {
+    var d = day_(i);
+    all.forEach(function (x) {
+      if (x.date !== d) return;
+      var hit = x.types.filter(function (t) { return (FEST_LEAD[t] || 3) === i; });
+      if (!hit.length) return;
+      var prep = hit.map(function (t) { return FEST_PREP[t] || ''; }).filter(String);
+      if (x.note) prep.push(x.note);
+      msgs.push(d.slice(5).replace('-', '/') + '（' + '日一二三四五六'.charAt(dow_(d)) + (x.lunar ? '・' + x.lunar : '') + '）' + x.name + '，還有 ' + i + ' 天' + (prep.length ? '\n準備：' + prep.join('；') : ''));
+    });
+  }
+  if (!msgs.length) return;
+  notifyTo_(true, '🏮 節日提醒' + (msgs.length > 1 ? '（' + msgs.length + ' 項）' : ''), msgs.join('\n').slice(0, 400), ['組長', '管理者']);
+}
+
 function overview_(today, mode) {
   var c = cfg_(), full = mode === 'admin', viewer = mode === 'viewer';
   var users = users_().map(function (u) { return { name: u.name, pin: full && u.role !== '管理者' ? u.pin : '', enabled: u.enabled, role: u.role }; });
@@ -712,7 +772,7 @@ function overview_(today, mode) {
     today: today, days: c.days, users: viewer ? [] : users, clock: viewer ? [] : clock,
     schedule: shifts_(today, day_(c.days - 1)).map(function (s) { return { date: s.date, name: s.name, start: s.start, end: s.end, note: s.note }; }),
     reports: reports, stays: stays, settings: full ? settings : {},
-    news: news_(CONFIG.NEWS_MAX), devices: viewer ? {} : deviceCount_(), role: mode
+    news: news_(CONFIG.NEWS_MAX), devices: viewer ? {} : deviceCount_(), role: mode, fest: festSoon_(c.days)
   };
 }
 
