@@ -2,7 +2,7 @@
  * 德化廟務 App（德化宮 廟務總管小組）｜簽到退＋回報＋自選排班＋管理者／組長／前賢介面＋App 推播與公告 後台（v5.3）
  * 這份程式碼放在公開的 GitHub（dehuaacademy/attendance/backend），不可寫入任何密碼或頻道名稱。
  * 更新方式：推到 GitHub 後，由獨立的「德化更新器」自動安裝並更新部署（見維護說明）。
- * 綁定在試算表「德化 廟務打卡紀錄」上，部署成網頁應用程式，只回傳資料（JSON），不負責畫面。
+ * 綁定在試算表「德化 廟務紀錄」上（雲端硬碟資料夾「廟務總管｜Temple Managers」），部署成網頁應用程式，只回傳資料（JSON），不負責畫面。
  * 前台網頁放在 GitHub Pages：https://dehuaacademy.github.io/attendance/
  *
  * 試算表分頁：
@@ -12,7 +12,7 @@
  *   設定     項目｜值｜說明  ← 區域、定位範圍、可排班天數、推播開關；App 管理介面可改
  *   操作紀錄 管理者在 App 上的每一個操作
  *   排班表   組員在 App 自選日期登記／取消（系統寫入）；管理者也可以直接加列或改狀態
- *   打卡紀錄 系統自動寫入
+ *   簽到退紀錄 系統自動寫入（v6.5 前叫「打卡紀錄」，第一次讀取時自動改名）
  *   回報     事務回報，系統自動寫入（照片存雲端硬碟，這裡放連結）
  *   住廟回報 每位住廟者一列：送出日期｜回報人｜區域｜姓名（送出日期即住廟日期）
  *   推播裝置 每支開啟通知的手機一列（App 自動登記；失效的會標示，不用手動整理）
@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '6.5';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.5.1';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -53,7 +53,7 @@ var SHEETS = {
   settings: { name: '設定',     header: ['項目', '值', '說明'] },
   oplog:    { name: '操作紀錄', header: ['時間', '操作者', '動作', '內容'] },
   schedule: { name: '排班表',   header: ['日期', '姓名', '上班', '下班', '備註', '來源', '狀態', '登記時間', '取消時間'] },
-  clock:    { name: '打卡紀錄', header: ['日期', '時間', '姓名', '類型', '是否在範圍內', '距離(公尺)', '緯度', '經度', '定位精確度(公尺)', '伺服器時間戳記'] },
+  clock:    { name: '簽到退紀錄', old: '打卡紀錄', header: ['日期', '時間', '姓名', '類型', '是否在範圍內', '距離(公尺)', '緯度', '經度', '定位精確度(公尺)', '伺服器時間戳記'] },
   report:   { name: '回報',     header: ['送出日期', '送出時間', '回報日期', '姓名', '類型', '內容', '照片1', '照片2', '照片3', '伺服器時間戳記'] },
   stay:     { name: '住廟回報', header: ['送出日期', '送出時間', '回報人', '區域', '姓名', '伺服器時間戳記', '事務'] },
   chkItems: { name: '每日檢核', header: ['區塊', '項目', '適用', '類型'] },
@@ -216,7 +216,7 @@ function handle_(fn) {
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
 
-// ===== 狀態：姓名、今日打卡、全組班表 =====
+// ===== 狀態：姓名、今日簽到退、全組班表 =====
 function status_(code) {
   var who = auth_(code);
   var today = fmt_(new Date(), 'yyyy-MM-dd');
@@ -299,7 +299,7 @@ function readShifts_(from, to) {
   return out;
 }
 
-// ===== 打卡 =====
+// ===== 簽到／簽退 =====
 function clock_(b) {
   var name = user_(b.u);
   if (b.type !== '簽到' && b.type !== '簽退') throw new Error('類型錯誤');
@@ -825,7 +825,7 @@ function log_(who, action, detail) {
 
 // ===== 推播通知 =====
 // audience：'admin'（預設：管理者＋組長）、'all'（管理者＋組長＋組員）、或角色陣列
-// App 推播（FCM）和 ntfy 並行；兩種都沒送到管理者時改寄 Email。通知失敗不影響打卡
+// App 推播（FCM）和 ntfy 並行；兩種都沒送到管理者時改寄 Email。通知失敗不影響簽到退
 function notify_(title, message, priority, audience) {
   var c = cfg_(), toAdmin = 0, ntfyOk = false, rep = { fcm: '', ntfy: '', mail: '' };
   try {
@@ -1448,6 +1448,7 @@ function sheet_(key) {
   var def = SHEETS[key];
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(def.name);
+  if (!sh && def.old) { sh = ss.getSheetByName(def.old); if (sh) sh.setName(def.name); }   // 舊分頁名稱自動改成新的
   if (!sh) {
     sh = ss.insertSheet(def.name);
     sh.getRange(1, 1, 1, def.header.length).setValues([def.header])
