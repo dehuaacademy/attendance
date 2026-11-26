@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '6.2';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.3';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -55,7 +55,9 @@ var SHEETS = {
   schedule: { name: '排班表',   header: ['日期', '姓名', '上班', '下班', '備註', '來源', '狀態', '登記時間', '取消時間'] },
   clock:    { name: '打卡紀錄', header: ['日期', '時間', '姓名', '類型', '是否在範圍內', '距離(公尺)', '緯度', '經度', '定位精確度(公尺)', '伺服器時間戳記'] },
   report:   { name: '回報',     header: ['送出日期', '送出時間', '回報日期', '姓名', '類型', '內容', '照片1', '照片2', '照片3', '伺服器時間戳記'] },
-  stay:     { name: '住廟回報', header: ['送出日期', '送出時間', '回報人', '區域', '姓名', '伺服器時間戳記'] },
+  stay:     { name: '住廟回報', header: ['送出日期', '送出時間', '回報人', '區域', '姓名', '伺服器時間戳記', '事務'] },
+  chkItems: { name: '每日檢核', header: ['區塊', '項目', '適用', '類型'] },
+  chkLog:   { name: '檢核紀錄', header: ['日期', '區塊', '項目', '值', '人員', '時間'] },
   devices:  { name: '推播裝置', header: ['Token', '姓名', '角色', '裝置', '登記時間', '最後更新', '狀態'] },
   news:     { name: '公告',     header: ['時間', '發布者', '標題', '內容', '送達手機數'] },
   cash:     { name: '零用金',   header: ['編號', '建立時間', '日期', '類型', '金額', '科目', '說明', '經手人', '收據1', '收據2', '收據3', '狀態', '核准金額', '核准人', '核准時間', '核對人', '核對時間', '還款時間', '備註', '請購單號'] },
@@ -77,7 +79,7 @@ var SETTINGS = [
   ['推播：ntfy',     '是',  '是／否（舊的 ntfy 通知；App 推播穩定後可以關掉）'],
   ['推播：零用金',   '是',  '是／否（請購、支出、撥款、低餘額通知）'],
   ['推播：報修',     '是',  '是／否（新報修通知組長和管理者；緊急的也通知執行長；完成時通知回報人）'],
-  ['零用金科目',     '香燭供品,供果供品,食材,清潔用品,水電修繕,交通,餐點,文具,雜支', '用逗號分隔'],
+  ['零用金科目',     '香燭供品,供果供品,食材,餐點,清潔用品,文具,水電修繕,設備,住宿寢具,佛具,活動班程,印刷文宣,交通,雜支', '用逗號分隔'],
   ['零用金核准門檻(元)', '5000', '支出或代墊超過這個金額，要先開請購單，執行長核准後才能記帳'],
   ['免核准科目',     '供果供品', '這些科目超過門檻也不用核准，用逗號分隔'],
   ['零用金低餘額(元)', '2000', '組長手上餘額低於這個數字時通知組長、財務、管理者']
@@ -94,7 +96,7 @@ var PUSH_DESC = { '組員': '公告、缺人提醒和報修結果', '組長': '�
 // App 裡任何寫入都會立刻清掉相關快取；直接改試算表會由 onEdit 清掉全部快取
 var CACHE_TTL = 600;
 var CK = { users: 'c_users', settings: 'c_settings', shifts: 'c_shifts_', news: 'c_news_', clock: 'c_clock_',
-           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash', preq: 'c_preq', repairs: 'c_repairs', locs: 'c_locs' };   // 結尾是 _ 的會加上今天日期
+           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash', preq: 'c_preq', repairs: 'c_repairs', locs: 'c_locs', chkItems: 'c_chkitems', chk: 'c_chk_' };   // 結尾是 _ 的會加上今天日期
 var _users = null, _bustKeys = [];
 function cache_(key, loader) {
   var c = CacheService.getScriptCache(), v = null;
@@ -187,6 +189,7 @@ function doPost(e) {
     if (body.action === 'thumbs') return thumbs_(body);
     if (body.action === 'cash')   return cash_(body);
     if (body.action === 'repair') return repair_(body);
+    if (body.action === 'check')  return check_(body);
     if (body.action === 'me')     return me_(body);
     throw new Error('未知的操作');
   });
@@ -346,6 +349,101 @@ function report_(b) {
   return { time: fmt_(now, 'HH:mm'), photos: photos.length };
 }
 
+// ===== 每日檢核（依廟務經辦 v0.4 第 3 頁「廟務經理快速檢核」）=====
+// 「每日檢核」分頁：區塊｜項目｜適用｜類型。適用空白＝每天；「一三五」＝只在星期一、三、五；「每月20」＝每月 20 日
+// 類型空白＝打勾；「文字」＝填寫（交接的異常事項、隔日提醒、用餐人數）。管理者可以直接在分頁增刪項目
+// 「檢核紀錄」分頁：每打勾／取消／填寫一次寫一列，同一項以最後一列為準
+// 晚上 21:00 由觸發器檢查，還有沒完成的就通知組長和管理者
+var CHK_SEED = [
+  ['交接', '人員簽到', '', ''], ['交接', '鑰匙', '', ''], ['交接', '遙控器（2 把）', '', ''],
+  ['交接', '異常事項', '', '文字'], ['交接', '隔日提醒', '', '文字'], ['交接', '用餐人數', '', '文字'],
+  ['早晨', '煮飯分工', '', ''], ['早晨', '打掃分工', '', ''], ['早晨', '庭院打掃', '', ''],
+  ['晚間', '收洗敬杯', '', ''], ['晚間', '平爐', '', ''], ['晚間', '擦佛桌', '', ''], ['晚間', '關窗門', '', ''],
+  ['餐廚', '冰箱', '', ''], ['餐廚', '食材數量', '', ''], ['餐廚', '米', '', ''], ['餐廚', '瓦斯', '', ''],
+  ['餐廚', '爐台', '', ''], ['餐廚', '流理台', '', ''], ['餐廚', '餐具歸位', '', ''], ['餐廚', '廚餘', '', ''],
+  ['環境', '佛堂', '', ''], ['環境', '餐廳', '', ''], ['環境', '宿舍', '', ''], ['環境', '廁所', '', ''],
+  ['環境', '淋浴間', '', ''], ['環境', '庭院', '', ''], ['環境', '垃圾', '一三五', ''], ['環境', '飲水機廢水桶', '', ''],
+  ['門禁', '園區大小門', '', ''], ['門禁', '鐵捲門', '', ''], ['門禁', '餐廳門', '', ''], ['門禁', '彌勒院門', '', ''],
+  ['門禁', '祖師祠', '', ''], ['門禁', '瓦斯', '', ''], ['門禁', '電燈', '', ''],
+  ['紀錄', '請購', '', ''], ['紀錄', '報修', '', ''], ['紀錄', '設備維修', '', ''], ['紀錄', '異常事件', '', ''],
+  ['紀錄', '每週物料庫存', '三', ''], ['紀錄', '基金會月報', '每月20', '']
+];
+function chkItemsAll_() {
+  return cache_(CK.chkItems, function () {
+    var sh = sheet_('chkItems');
+    if (sh.getLastRow() < 2) sh.getRange(2, 1, CHK_SEED.length, 4).setValues(CHK_SEED);
+    return sh.getRange(2, 1, sh.getLastRow() - 1, 4).getDisplayValues()
+      .map(function (r) { return { sec: String(r[0]).trim(), item: String(r[1]).trim(), when: String(r[2]).trim(), type: String(r[3]).trim() === '文字' ? 'text' : 'check' }; })
+      .filter(function (x) { return x.sec && x.item; });
+  });
+}
+// 今天適用的項目
+function chkItemsFor_(date) {
+  var p = date.split('-'), wd = '日一二三四五六'.charAt(dow_(date)), dom = +p[2];
+  return chkItemsAll_().filter(function (x) {
+    if (!x.when) return true;
+    var m = x.when.match(/^每月(\d+)$/);
+    if (m) return dom === +m[1];
+    return x.when.indexOf(wd) >= 0;
+  });
+}
+function chkKey_(sec, item) { return sec + '｜' + item; }
+// 某一天的檢核狀態 {key: {v, by, at}}（最後一筆為準）
+function chkState_(date) {
+  var key = CK.chk + date;
+  var load = function () {
+    var sh = sheet_('chkLog'), last = sh.getLastRow(), out = {};
+    if (last < 2) return out;
+    var st = Math.max(2, last - 1500);
+    sh.getRange(st, 1, last - st + 1, 6).getDisplayValues().forEach(function (r) {
+      if (normDate_(r[0]) !== date) return;
+      out[chkKey_(r[1], r[2])] = { v: r[3], by: r[4], at: hhmm_(r[5]) };
+    });
+    return out;
+  };
+  return cache_(key, load);
+}
+function check_(b) {
+  var me = auth_(b.u), can = ['組員', '組長', '管理者'].indexOf(me.role) >= 0, today = day_(0);
+  if (b.op === 'list') {
+    ensureEveningTrigger_();
+    var yday = day_(-1), prev = chkState_(yday), handover = {};
+    chkItemsAll_().forEach(function (x) { if (x.type === 'text' && prev[chkKey_(x.sec, x.item)] && prev[chkKey_(x.sec, x.item)].v) handover[x.item] = prev[chkKey_(x.sec, x.item)]; });
+    return { today: today, canEdit: can, items: chkItemsFor_(today), state: chkState_(today), handover: handover };
+  }
+  if (b.op === 'set') {
+    if (!can) throw new Error('只有組員、組長可以勾檢核');
+    var sec = String(b.sec || ''), item = String(b.item || ''), def = chkItemsFor_(today).filter(function (x) { return x.sec === sec && x.item === item; })[0];
+    if (!def) throw new Error('找不到這個檢核項目，請重新整理');
+    var v = def.type === 'text' ? String(b.v || '').trim().slice(0, 300) : (b.v ? '✓' : '');
+    var now = new Date();
+    sheet_('chkLog').appendRow(["'" + today, sec, item, v, me.name, "'" + fmt_(now, 'HH:mm:ss')]);
+    bust_(['chk']);
+    return { key: chkKey_(sec, item), v: v, by: me.name, at: fmt_(now, 'HH:mm') };
+  }
+  throw new Error('未知的檢核操作');
+}
+// 21:00 檢查今天還沒完成的項目（文字項目不算）
+function eveningCheck() {
+  var today = day_(0), st = chkState_(today);
+  var left = chkItemsFor_(today).filter(function (x) { return x.type === 'check' && !(st[chkKey_(x.sec, x.item)] || {}).v; });
+  if (!left.length) return;
+  var by = {};
+  left.forEach(function (x) { (by[x.sec] = by[x.sec] || []).push(x.item); });
+  notifyTo_(true, '📋 今日檢核還有 ' + left.length + ' 項未完成',
+            Object.keys(by).map(function (k) { return k + '：' + by[k].join('、'); }).join('\n').slice(0, 300), ['組長', '管理者']);
+}
+// 第一次使用檢核時建立 21:00 觸發器（只建一次）
+function ensureEveningTrigger_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('EVENING_TRIGGER') === '1') return;
+  try {
+    var has = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'eveningCheck'; });
+    if (!has) ScriptApp.newTrigger('eveningCheck').timeBased().everyDays(1).atHour(21).inTimezone(CONFIG.TZ).create();
+    props.setProperty('EVENING_TRIGGER', '1');
+  } catch (e) {}
+}
+
 // ===== 每天自動執行：檢查未來 7 天有沒有人排班，並更新統計 =====
 function dailyCheck() {
   var from = day_(1), to = day_(CONFIG.GAP_CHECK_DAYS);
@@ -413,22 +511,24 @@ function onOpen() {
 }
 
 // ===== 住廟回報：一次送出多位（區域＋姓名），日期即送出當天 =====
+var STAY_DUTIES = ['天廚', '志工', '輪值', '其他'];   // 住廟回報的事務選項
 function stay_(b) {
   var who = user_(b.u);
   var rows = (Array.isArray(b.rows) ? b.rows : []).map(function (r) {
-    return { area: String(r && r.area || '').trim(), name: String(r && r.name || '').trim() };
+    return { area: String(r && r.area || '').trim(), name: String(r && r.name || '').trim(), duty: String(r && r.duty || '').trim() };
   }).filter(function (r) { return r.name; });
   if (!rows.length) throw new Error('請至少填一位住廟者');
   if (rows.length > CONFIG.STAY_MAX_ROWS) throw new Error('一次最多 ' + CONFIG.STAY_MAX_ROWS + ' 位');
   rows.forEach(function (r, i) {
     if (cfg_().areas.indexOf(r.area) < 0) throw new Error('第 ' + (i + 1) + ' 位「' + r.name + '」請選擇區域');
     if (r.name.length > 30) throw new Error('姓名太長：' + r.name.slice(0, 10) + '…');
+    if (r.duty && STAY_DUTIES.indexOf(r.duty) < 0) throw new Error('事務選項錯誤');
   });
   var now = new Date(), d = "'" + fmt_(now, 'yyyy-MM-dd'), t = "'" + fmt_(now, 'HH:mm:ss');
   var sh = sheet_('stay');
   bust_(['stays']);
-  sh.getRange(sh.getLastRow() + 1, 1, rows.length, 6).setValues(rows.map(function (r) {
-    return [d, t, who, r.area, r.name, now];
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, 7).setValues(rows.map(function (r) {
+    return [d, t, who, r.area, r.name, now, r.duty];
   }));
   return { time: fmt_(now, 'HH:mm'), count: rows.length };
 }
@@ -599,7 +699,7 @@ function overview_(today, mode) {
     });
   });
   var stays = cache_(CK.stays, function () {
-    return tail('stay', 5, 60).map(function (r) { return { date: normDate_(r[0]), by: r[2], area: r[3], name: r[4] }; });
+    return tail('stay', 7, 60).map(function (r) { return { date: normDate_(r[0]), by: r[2], area: r[3], name: r[4], duty: r[6] }; });
   });
 
   var settings = {};
