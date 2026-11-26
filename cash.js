@@ -2,7 +2,8 @@
 // 組員：回報 →「財務」；組長：管理 →「財務」；管理者、前賢、執行長、財務：上方「財務」分頁
 var CASH = null, CASH_HOST = '', cashWho = '', cashArm = '', cashType = '', cashMonth = '', cashSeg = 'book';
 var cashPr = '', prRepair = null;     // 記帳時預選的請購單；開請購單時對應的報修單 {id, loc}
-var cashPh = [], qPh = [];            // 收據照片、報價照片（已壓縮的 dataURL）
+var cashPh = [], qPh = [];
+var cashEnt = '';                     // 月報篩選主體（空白＝全部）            // 收據照片、報價照片（已壓縮的 dataURL）
 
 function cashOpen(host) { CASH_HOST = host; cashRender(); cashLoad(); }
 function cashLoad() {
@@ -49,6 +50,10 @@ function cashSpent(e) {
 }
 function cashBig(amount, cat) { return amount > CASH.limit && CASH.exempt.indexOf(cat) < 0; }
 function prById(id) { return (CASH.preqs || []).filter(function (p) { return p.id === id; })[0]; }
+function entOfCat(cat) { var m = CASH.entCats || {}; return (CASH.ents || []).filter(function (k) { return (m[k] || []).indexOf(cat) >= 0; })[0] || ''; }
+function entOpts(sel, blank) { return (blank ? '<option value="">' + blank + '</option>' : '') + (CASH.ents || []).map(function (k) { return '<option' + (k === sel ? ' selected' : '') + '>' + k + '</option>'; }).join(''); }
+// 選科目時自動帶主體（交通、雜支等沒有預設的要自己選）
+function entAuto(catId, entId) { if ($(entId)) $(entId).value = entOfCat($(catId).value); }
 function catOpts(sel) { return '<option value="">科目</option>' + CASH.cats.map(function (c) { return '<option' + (c === sel ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join(''); }
 
 function cashHtml() {
@@ -56,10 +61,14 @@ function cashHtml() {
   var C = CASH, k = C.caps, me = C.me.name, h = '';
 
   // 1. 餘額
-  if (C.balance !== null) {
-    var low = C.balance < C.low;
-    h += '<div class="card cbal' + (low ? ' low' : '') + '"><small>組長手上零用金</small><b>' + nt(C.balance) + '</b>'
-       + (low ? '<span class="bad">低於 ' + nt(C.low) + '，請財務撥款</span>' : '') + '</div>';
+  if (C.bal) {
+    h += '<div class="cbal2">' + C.ents.map(function (k) {
+      var cash = C.bal[k] || 0, q = C.quota[k] || 0, low = cash < C.low;
+      return '<div class="card cbal' + (low ? ' low' : '') + '"><small>' + k + '零用金</small><b>' + nt(cash) + '</b>'
+        + '<small>額度 ' + nn(q) + '・待補憑證 ' + nn(q - cash) + (C.pend[k] ? '（待核對 ' + nn(C.pend[k]) + '）' : '') + '</small>'
+        + (low ? '<span class="bad">低於 ' + nn(C.low) + '，請財務撥補</span>' : '') + '</div>';
+    }).join('') + '</div>';
+    if (C.bal['未指定']) h += '<small class="mid">有舊紀錄沒有主體（' + nt(C.bal['未指定']) + '），請財務在月報改主體</small>';
   }
 
   // 2. 待處理（只列我能處理的）
@@ -94,7 +103,8 @@ function preqHtml() {
     h += '<div class="card"><h3 class="ah">開請購單</h3>'
        + (prRepair ? '<div class="clink">🔧 對應報修：' + esc(prRepair.loc) + ' <a onclick="prRepair=null;cashRender()">取消對應</a></div>' : '')
        + '<input id="pqItem" maxlength="60" placeholder="品項：要買什麼、修什麼">'
-       + '<div class="srow2"><select id="pqCat">' + catOpts() + '</select><input id="pqEst" type="number" inputmode="numeric" placeholder="預估金額（元）"></div>'
+       + '<div class="srow2"><select id="pqCat" onchange="entAuto(\'pqCat\',\'pqEnt\')">' + catOpts() + '</select><select id="pqEnt">' + entOpts('', '主體') + '</select></div>'
+       + '<input id="pqEst" type="number" inputmode="numeric" placeholder="預估金額（元）">'
        + '<input id="pqNote" maxlength="300" placeholder="用途、說明（可空白）">'
        + '<label>報價照片（至少 2 家，最多 3 張）</label><div class="photos" id="pqPhotos"></div>'
        + '<input type="file" id="pqPick" accept="image/*" multiple class="hide">'
@@ -109,7 +119,7 @@ function preqHtml() {
 function preqItem(p, act) {
   var k = CASH.caps, me = CASH.me.name, id = p.id, h = '<div class="rep citem">';
   h += '<div><b>' + esc(p.item) + '</b> <span class="' + (CASH_TAG[p.status] || 'mid') + '">請購・' + esc(p.status) + '</span><span class="camt">' + nn(p.est) + '</span></div>'
-     + '<small class="cmeta">' + esc(p.created.slice(5, 10).replace('-', '/')) + '・' + esc(p.by) + '・' + esc(p.cat) + '・報價 ' + p.quotes.length + ' 家'
+     + '<small class="cmeta">' + esc(p.created.slice(5, 10).replace('-', '/')) + '・' + esc(p.by) + '・' + esc(p.ent || '未指定') + '・' + esc(p.cat) + '・報價 ' + p.quotes.length + ' 家'
      + (p.apprBy ? '・' + (p.status === '退回' ? '退回' : '核准') + '：' + esc(p.apprBy) : '') + '</small>';
   if (p.note) h += '<p>' + esc(p.note) + '</p>';
   if (p.reason) h += '<p class="crem">單一報價理由：' + esc(p.reason) + '</p>';
@@ -147,21 +157,25 @@ function bookHtml() {
     else h += '<small>' + (cashType === '代墊' ? '自己先付的錢，組長之後用零用金還你' : '') + '</small>';
     h += '<select id="cxPr" onchange="cashPr=this.value;cashRender()"><option value="">不對應請購單（小額支出）</option>' + prs.map(function (p) {
            return '<option value="' + p.id + '"' + (p.id === cashPr ? ' selected' : '') + '>請購：' + esc(p.item) + '（' + nn(p.est) + '）</option>'; }).join('') + '</select>'
-       + '<div class="srow2"><input id="cxDate" type="date" value="' + C.today + '" max="' + C.today + '"><select id="cxCat" onchange="cashHint()">' + catOpts(sel ? sel.cat : '') + '</select></div>'
+       + '<div class="srow2"><select id="cxCat" onchange="entAuto(\'cxCat\',\'cxEnt\');cashHint()">' + catOpts(sel ? sel.cat : '') + '</select><select id="cxEnt">' + entOpts(sel ? sel.ent : '', '主體') + '</select></div>'
+       + '<input id="cxDate" type="date" value="' + C.today + '" max="' + C.today + '">'
        + '<input id="cxAmt" type="number" inputmode="numeric" min="1" placeholder="實際金額（元）" oninput="cashHint()">'
        + '<input id="cxNote" maxlength="200" placeholder="說明：買了什麼、在哪裡買" value="' + (sel ? esc(sel.item) : '') + '">'
        + '<label>' + (cashType === '直付' ? '發票、匯款單照片' : '收據照片') + '（最多 3 張）</label><div class="photos" id="cxPhotos"></div>'
        + '<input type="file" id="cxPick" accept="image/*" multiple class="hide">'
        + '<div id="cxHint" class="chint"></div>'
        + '<button class="big send" id="cxBtn" onclick="cashAdd()">送出</button>'
-       + '<small>' + (cashType === '直付' ? '財務直付不扣組長的零用金，但會算進月報' : '超過 ' + nt(C.limit) + '（' + esc(C.exempt.join('、') || '無') + '除外）要先開請購單，核准後在上面選那張請購單') + '</small></div>';
+       + '<small>主體依科目自動帶（德化宮：' + esc((C.entCats['德化宮'] || []).join('、')) + '；其他科目多為基金會，交通、雜支請自己選）。付現金時從該主體的信封拿，收據放回同一個信封。'
+       + (cashType === '直付' ? '財務直付不扣組長的零用金，但會算進月報' : '超過 ' + nt(C.limit) + '（' + esc(C.exempt.join('、') || '無') + '除外）要先開請購單，核准後在上面選那張請購單') + '</small></div>';
   }
   if (k.fund) {
     h += '<div class="card"><h3 class="ah">零用金撥款／繳回</h3>'
-       + '<div class="srow2"><select id="cfType"><option value="撥入">撥款給組長</option><option value="繳回">組長繳回</option></select><input id="cfDate" type="date" value="' + C.today + '" max="' + C.today + '"></div>'
+       + '<div class="srow2"><select id="cfType"><option value="撥入">撥款／撥補給組長</option><option value="繳回">組長繳回</option></select><select id="cfEnt">' + entOpts('', '哪一個零用金') + '</select></div>'
+       + '<input id="cfDate" type="date" value="' + C.today + '" max="' + C.today + '">'
        + '<input id="cfAmt" type="number" inputmode="numeric" min="1" placeholder="金額（元）">'
        + '<input id="cfNote" maxlength="200" placeholder="備註（可空白）">'
-       + '<button class="big in" onclick="cashFund()">登記</button></div>';
+       + '<button class="big in" onclick="cashFund()">登記</button>'
+       + '<small>定額制：核對憑證後，撥補已花掉的金額，讓現金回到額度（德化宮 ' + nn(C.quota['德化宮']) + '、基金會 ' + nn(C.quota['基金會']) + '）</small></div>';
   }
   if (!types.length && !k.fund) h += '<div class="card"><div class="empty">你的角色只能看帳，可以看「月報」</div></div>';
   return h;
@@ -174,10 +188,12 @@ function monthHtml() {
   C.rows.forEach(function (e) { var m = (e.date || '').slice(0, 7); if (m && months.indexOf(m) < 0) months.push(m); });
   months.sort().reverse();
   if (!cashMonth || months.indexOf(cashMonth) < 0) cashMonth = months[0] || C.today.slice(0, 7);
-  var list = C.rows.filter(function (e) { return (e.date || '').slice(0, 7) === cashMonth; });
+  var list = C.rows.filter(function (e) { return (e.date || '').slice(0, 7) === cashMonth && (!cashEnt || (e.ent || '未指定') === cashEnt); });
   h += '<div class="card"><h3 class="ah">' + (k.all ? '月報' : '我的紀錄') + '</h3>';
   if (months.length > 1) h += '<select onchange="cashMonth=this.value;cashRender()">' + months.map(function (m) {
     return '<option' + (m === cashMonth ? ' selected' : '') + ' value="' + m + '">' + m.replace('-', ' 年 ') + ' 月</option>'; }).join('') + '</select>';
+  h += '<div class="seg">' + [['', '全部']].concat(C.ents.map(function (k) { return [k, k]; })).map(function (x) {
+    return '<button class="' + (x[0] === cashEnt ? 'on' : '') + '" onclick="cashEnt=\'' + x[0] + '\';cashRender()">' + x[1] + '</button>'; }).join('') + '</div>';
   if (k.all) {
     var by = {}, petty = 0, direct = 0, fin = 0, ret = 0;
     list.forEach(function (e) {
@@ -190,7 +206,7 @@ function monthHtml() {
     var cats = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; });
     if (cats.length) h += cats.map(function (c) { return '<div class="lrow"><span>' + esc(c) + '</span><b>' + nt(by[c]) + '</b></div>'; }).join('')
       + '<div class="lrow"><span><b>合計</b></span><b>' + nt(petty + direct) + '</b></div>';
-    h += '<small>只算已經花出去的（零用金支出、代墊、財務直付），不含作廢</small>';
+    h += '<small>只算已經花出去的（零用金支出、代墊、財務直付），不含作廢' + (cashEnt ? '；只看' + cashEnt : '；德化宮、基金會合計，交帳請分開看') + '</small>';
   }
   h += '<div class="clist">' + (list.length ? list.map(function (e) { return cashItem(e, false); }).join('') : '<div class="empty">這個月沒有紀錄</div>') + '</div></div>';
   return h;
@@ -202,7 +218,7 @@ function cashItem(e, act) {
   var sign = e.type === '撥入' ? '＋' : '－', pr = e.pr ? prById(e.pr) : null;
   h += '<div><b>' + esc(e.type === '撥入' || e.type === '繳回' ? e.type : e.cat) + '</b> <span class="' + (CASH_TAG[e.status] || 'mid') + '">' + esc(e.status) + '</span>'
      + '<span class="camt' + (e.type === '撥入' ? ' plus' : '') + '">' + sign + nn(e.amount) + '</span></div>'
-     + '<small class="cmeta">' + esc(e.date.slice(5).replace('-', '/')) + '・' + esc(e.by) + '・' + esc(TYPE_LABEL[e.type] || e.type)
+     + '<small class="cmeta"><span class="cent">' + esc(e.ent || '未指定') + '</span>' + esc(e.date.slice(5).replace('-', '/')) + '・' + esc(e.by) + '・' + esc(TYPE_LABEL[e.type] || e.type)
      + (e.checkBy ? '・核對：' + esc(e.checkBy) : '') + (e.repaidAt ? '・已還款' : '') + '</small>';
   if (e.note) h += '<p>' + esc(e.note) + '</p>';
   if (e.pr) h += '<small class="cmeta">📝 請購 ' + (pr ? esc(pr.item) + '（預估 ' + nn(pr.est) + (e.amount > pr.est ? '，⚠️ 超過' : '') + '）' : esc(e.pr)) + '</small>';
@@ -212,11 +228,12 @@ function cashItem(e, act) {
 
   var btn = [];
   if (act) {
-    if (k.check && e.status === '待核對') btn.push('<button class="sb pri" onclick="cashOp(\'check\',\'' + id + '\')">核對無誤</button>');
+    if (k.check && e.status === '待核對') btn.push('<select id="ce' + id + '" class="csel">' + entOpts(e.ent, e.ent ? '' : '主體') + '</select><button class="sb pri" onclick="cashCheck(\'' + id + '\')">核對無誤</button>');
     if (k.repay && e.type === '代墊' && e.status === '待還款') btn.push('<button class="sb pri" onclick="cashConfirm(\'repay\',\'' + id + '\',this)">已還 ' + esc(e.by) + ' ' + nn(e.amount) + ' 元</button>');
   } else {
     var canVoid = (e.by === me && ['待核准', '已核准', '待核對', '待還款', '已入帳', '已付款'].indexOf(e.status) >= 0) || (CASH.me.role === '管理者' && ['已核對', '作廢'].indexOf(e.status) < 0);
     if (canVoid) btn.push('<button class="sb" onclick="cashAsk(\'void\',\'' + id + '\')">作廢</button>');
+    if (k.check && e.status !== '作廢') CASH.ents.forEach(function (x) { if (x !== e.ent) btn.push('<button class="sb" onclick="cashEntSet(\'' + id + '\',\'' + x + '\')">改為' + x + '</button>'); });
   }
   if (btn.length) h += '<div class="pb">' + btn.join('') + '</div>';
   h += reasonBox(id);
@@ -258,11 +275,21 @@ function cashOp(op, id) {
   var ok = { papprove: '請購已核准', preject: '請購已退回', pvoid: '請購已作廢', check: '已核對', repay: '已登記還款', void: '已作廢' }[op];
   cashSend({ op: op, id: id, note: note }, ok).catch(function () {});
 }
+function cashCheck(id) {
+  var ent = $('ce' + id) ? $('ce' + id).value : '';
+  if (!ent) { toast('⚠️ 請先選主體'); return; }
+  cashSend({ op: 'check', id: id, ent: ent }, '已核對（' + ent + '）').catch(function () {});
+}
+function cashEntSet(id, ent) {
+  if (!confirm('這筆改成「' + ent + '」？兩個零用金的待補金額會跟著調整')) return;
+  cashSend({ op: 'ent', id: id, ent: ent }, '已改為' + ent).catch(function () {});
+}
 function preqAdd() {
   var x = { op: 'padd', item: $('pqItem').value.trim(), cat: $('pqCat').value, est: Number($('pqEst').value), note: $('pqNote').value.trim(),
-            reason: $('pqReason').value.trim(), quotes: qPh, repair: prRepair ? prRepair.id : '' };
+            reason: $('pqReason').value.trim(), quotes: qPh, repair: prRepair ? prRepair.id : '', ent: $('pqEnt').value };
   if (!x.item) { toast('⚠️ 請填品項'); return; }
   if (!x.cat) { toast('⚠️ 請選擇科目'); return; }
+  if (!x.ent) { toast('⚠️ 請選主體（德化宮或基金會）'); return; }
   if (!(x.est > 0)) { toast('⚠️ 請填預估金額'); return; }
   if (qPh.length < 2 && !x.reason) { toast('⚠️ 請附至少 2 家報價，或填只有 1 家的原因'); $('pqReason').focus(); return; }
   cashSend(x, '請購已送出，等執行長核准').then(function () {
@@ -270,8 +297,9 @@ function preqAdd() {
   }).catch(function () {});
 }
 function cashAdd() {
-  var x = { op: 'add', type: cashType, date: $('cxDate').value, cat: $('cxCat').value, amount: Number($('cxAmt').value), note: $('cxNote').value.trim(), photos: cashPh, pr: cashPr };
+  var x = { op: 'add', type: cashType, date: $('cxDate').value, cat: $('cxCat').value, amount: Number($('cxAmt').value), note: $('cxNote').value.trim(), photos: cashPh, pr: cashPr, ent: $('cxEnt').value };
   if (!x.cat) { toast('⚠️ 請選擇科目'); return; }
+  if (!x.ent) { toast('⚠️ 請選主體（德化宮或基金會）'); return; }
   if (!(x.amount > 0)) { toast('⚠️ 請填金額'); return; }
   if (!x.note) { toast('⚠️ 請填說明'); return; }
   if (x.type !== '直付' && !cashPr && cashBig(x.amount, x.cat)) { toast('⚠️ 超過 ' + nt(CASH.limit) + '，請先開請購單'); return; }
@@ -280,9 +308,10 @@ function cashAdd() {
     .then(function () { cashPh = []; cashPr = ''; ['cxAmt', 'cxNote'].forEach(function (i) { if ($(i)) $(i).value = ''; }); cashRender(); }).catch(function () {});
 }
 function cashFund() {
-  var x = { op: 'add', type: $('cfType').value, date: $('cfDate').value, amount: Number($('cfAmt').value), note: $('cfNote').value.trim() };
+  var x = { op: 'add', type: $('cfType').value, date: $('cfDate').value, amount: Number($('cfAmt').value), note: $('cfNote').value.trim(), ent: $('cfEnt').value };
+  if (!x.ent) { toast('⚠️ 請選哪一個零用金'); return; }
   if (!(x.amount > 0)) { toast('⚠️ 請填金額'); return; }
-  cashSend(x, x.type === '撥入' ? '已登記撥款' : '已登記繳回').then(function () { $('cfAmt').value = ''; $('cfNote').value = ''; cashRender(); }).catch(function () {});
+  cashSend(x, (x.type === '撥入' ? '已登記撥款：' : '已登記繳回：') + x.ent).then(function () { $('cfAmt').value = ''; $('cfNote').value = ''; cashRender(); }).catch(function () {});
 }
 
 // 照片：沿用回報的壓縮方式
