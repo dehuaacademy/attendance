@@ -163,6 +163,14 @@
   .cbal2{display:flex;gap:10px}.cbal2 .cbal{flex:1;min-width:0;padding:14px 8px}.cbal2 .cbal b{font-size:22px}.cbal2 .cbal small{font-size:12px}.cbal2 .bad{font-size:12px}
   .cent{display:inline-block;background:#eef1f8;border-radius:8px;padding:0 6px;margin-right:4px;font-size:12px}
   .csel{width:auto;margin:0 6px 0 0;padding:6px;font-size:14px}
+  .duty .drow{display:flex;justify-content:space-between;align-items:baseline;gap:8px}.duty .drow b{font-size:20px}.duty small{display:block;opacity:.75;margin-top:2px}
+  .duty .dnext{border-top:1px solid #eee;margin-top:8px;padding-top:8px;font-size:14px}.duty .tonight{color:#b26a00;font-weight:700}
+  .chksum{display:flex;justify-content:space-between;align-items:center;cursor:pointer}.chksum b{font-size:16px}.chksum span{color:#b26a00}.chksum span.ok{color:#2e7d32}
+  .calf{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.calf button{border:1px solid #c9c9c9;background:#fff;color:var(--navy);border-radius:16px;padding:6px 12px;font:inherit;font-size:14px}.calf button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .cal .crow{border-top:1px solid #eee;padding:8px 2px;display:flex;gap:10px}.cal .cd{min-width:92px}.cal .cd b{display:block}.cal .cd small{opacity:.6;font-size:12px}
+  .cal .cn{flex:1}.cal .cn small{display:block;opacity:.65;margin-top:2px}.cal .ct{display:inline-block;font-size:11px;border-radius:8px;padding:0 6px;margin-right:4px;background:#eef1f8}
+  .cal .ct.班程{background:#fde7c4}.cal .ct.輪值{background:#e3f2e6}.cal .ct.打掃{background:#e8e8e8}.cal .ct.節日{background:#fff3cd}
+  .cal details{margin-top:4px;font-size:13px;opacity:.85}.cal .past{opacity:.45}
 </style>
 </head>
 <body>
@@ -188,7 +196,8 @@
     <div class="date" id="today"></div>
   </header>
   <nav>
-    <button id="tab-clock" class="on" onclick="tab('clock')">簽到/簽退</button>
+    <button id="tab-clock" class="on" onclick="tab('clock')">簽到退</button>
+    <button id="tab-check" onclick="tab('check')">檢核</button>
     <button id="tab-report" onclick="tab('report')">回報</button>
     <button id="tab-schedule" onclick="tab('schedule')">班表</button>
     <button id="tab-news" onclick="tab('news')">公告</button>
@@ -204,7 +213,12 @@
       <button class="big in" id="btnIn" onclick="clock('簽到')">簽到</button>
       <button class="big out" id="btnOut" onclick="clock('簽退')">簽退</button>
       <div class="msg" id="mClock"></div>
+      <div id="chkSum"></div>
+      <div id="dutyStaff"></div>
       <div id="festStaff"></div>
+    </section>
+
+    <section id="check" class="hide">
       <div id="chkStaff"></div>
     </section>
 
@@ -245,8 +259,10 @@
     </section>
 
     <section id="schedule" class="hide">
+      <div class="seg"><button id="sg-sched" class="on" onclick="schedSeg('sched')">班表</button><button id="sg-cal" onclick="schedSeg('cal')">行事曆</button></div>
       <div class="msg" id="mSched"></div>
       <div class="card sched" id="schedList"><div class="empty">載入中…</div></div>
+      <div id="calStaff" class="hide"></div>
     </section>
   </main>
 </div>
@@ -259,6 +275,7 @@
   <nav class="adnav">
     <button id="at-people" class="on" onclick="adTabGo('people')">人員</button>
     <button id="at-today" onclick="adTabGo('today')">今日</button>
+    <button id="at-check" onclick="adTabGo('check')">檢核</button>
     <button id="at-sched" onclick="adTabGo('sched')">排班</button>
     <button id="at-log" onclick="adTabGo('log')">紀錄</button>
     <button id="at-news" onclick="adTabGo('news')">公告</button>
@@ -282,9 +299,9 @@
 <div id="lightbox" class="hide" onclick="closePhoto()"><img id="lbImg" alt=""><div id="lbMsg"></div></div>
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=19"></script>
-<script src="admin.js?v=13"></script>
-<script src="check.js?v=1"></script>
+<script src="app.js?v=20"></script>
+<script src="admin.js?v=14"></script>
+<script src="check.js?v=2"></script>
 <script src="cash.js?v=3"></script>
 <script src="repair.js?v=2"></script>
 <script src="push.js?v=4"></script>

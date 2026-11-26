@@ -1,5 +1,6 @@
 // ===== 每日檢核（廟務經辦 v0.4 第 3 頁）=====
-// 組員、組長：「簽到/簽退」頁下方，可以勾；管理者：「今日」頁，可以勾也可以看進度
+// 組員、組長：底部「檢核」分頁；管理者：上方「檢核」分頁。簽到頁、今日頁只顯示一行進度（點了跳過去）
+// 節日當天後台會多一個「節日準備」區塊（大型班程是前一天）
 var CHK = null, chkWho = '', chkOpen = {}, CHK_HOST = '';
 
 function chkLoad(host) {
@@ -13,7 +14,22 @@ function chkLoad(host) {
   }).catch(function () {});
 }
 function chkTyping() { var a = document.activeElement; return !!(a && a.id && a.id.indexOf('ck_') === 0); }
+function chkCount() {
+  var st = CHK.state || {}, done = 0, total = 0;
+  CHK.items.forEach(function (x) { if (x.type === 'check') { total++; if ((st[x.sec + '｜' + x.item] || {}).v) done++; } });
+  return { done: done, total: total, fest: CHK.items.some(function (x) { return x.sec === '節日準備'; }) };
+}
+function chkGo() { if (!$('admin').classList.contains('hide')) adTabGo('check'); else tab('check'); }
+function chkSumRender() {
+  ['chkSum', 'chkSumA'].forEach(function (id) {
+    if (!$(id)) return;
+    if (!CHK) { $(id).innerHTML = ''; return; }
+    var c = chkCount();
+    $(id).innerHTML = '<div class="card chksum" onclick="chkGo()"><b>📋 今日檢核' + (c.fest ? '（含節日準備）' : '') + '</b><span class="' + (c.done === c.total ? 'ok' : '') + '">' + c.done + ' / ' + c.total + ' ›</span></div>';
+  });
+}
 function chkRender() {
+  chkSumRender();
   if (!CHK_HOST || !$(CHK_HOST)) return;
   if (chkTyping()) return;
   $(CHK_HOST).innerHTML = chkHtml();

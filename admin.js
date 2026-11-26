@@ -18,7 +18,7 @@ function leadGo(t, noRender) {
 }
 
 // 管理者與唯讀角色（前賢、執行長、財務）共用這個畫面；唯讀角色只看得到排班、回報、公告、零用金，出勤資料都不能修改
-var VIEW_TABS = ['sched', 'log', 'news', 'repair', 'cash'], AD_TABS = ['people', 'today', 'sched', 'log', 'news', 'repair', 'cash', 'settings'];
+var VIEW_TABS = ['sched', 'log', 'news', 'repair', 'cash'], AD_TABS = ['people', 'today', 'check', 'sched', 'log', 'news', 'repair', 'cash', 'settings'];
 function adminStart(r) {
   busy = false;
   ROLE = r.role === 'viewer' ? 'viewer' : 'admin';
@@ -132,8 +132,11 @@ function adRender() {
   if (adTab === 'log') h = adLog();
   if (adTab === 'news') h = adNews();
   if (adTab === 'settings') h = adSettings();
+  if (adTab === 'check') h = '<div id="chkAdmin"></div>';
   $(HOST.body).innerHTML = h;
-  if (adTab === 'today' && typeof chkLoad === 'function') { CHK_HOST = 'chkAdmin'; chkRender(); chkLoad('chkAdmin'); }
+  if (adTab === 'check' && typeof chkLoad === 'function') { CHK_HOST = 'chkAdmin'; chkRender(); chkLoad('chkAdmin'); }
+  if (adTab === 'today' && typeof chkLoad === 'function') { CHK_HOST = ''; chkSumRender(); if (ROLE !== 'viewer') chkLoad(''); }
+  if (adTab === 'sched' && adSchedMode === 'cal') calLoad('calA');
   loadThumbs();
 }
 
@@ -195,7 +198,8 @@ function adDevice(name) {
 function adToday() {
   var t = AD.today;
   FEST = AD.fest || [];
-  var h = festCard(FEST, t) + '<div id="chkAdmin"></div><div class="card"><h3 class="ah">簽到／簽退</h3>';
+  DUTY = AD.duty || null;
+  var h = '<div id="chkSumA"></div>' + dutyCard(DUTY, t) + festCard(FEST, t) + '<div class="card"><h3 class="ah">簽到／簽退</h3>';
   if (!AD.clock.length) h += '<div class="empty">今天還沒有人簽到</div>';
   AD.clock.forEach(function (c) {
     var tag = c.inRange === '是' ? '<span class="ok">範圍內</span>' : c.inRange === '否' ? '<span class="bad">範圍外 ' + esc(c.dist) + 'm</span>' : '<span class="mid">' + esc(c.inRange) + '</span>';
@@ -212,8 +216,15 @@ function adToday() {
 
 // ---- 排班 ----
 var schedOpen = '';
+var adSchedMode = 'sched';
+function adSchedSeg(m) { adSchedMode = m; adRender(); }
 function adSched() {
   FEST = AD.fest || [];
+  var seg = '<div class="seg"><button class="' + (adSchedMode === 'sched' ? 'on' : '') + '" onclick="adSchedSeg(\'sched\')">' + (ROLE === 'viewer' ? '班表' : '排班') + '</button><button class="' + (adSchedMode === 'cal' ? 'on' : '') + '" onclick="adSchedSeg(\'cal\')">行事曆</button></div>';
+  if (adSchedMode === 'cal') return seg + '<div id="calA"></div>';
+  return seg + adSchedList();
+}
+function adSchedList() {
   var by = {};
   AD.schedule.forEach(function (s) { (by[s.date] = by[s.date] || []).push(s); });
   var base = new Date(AD.today + 'T00:00:00'), h = '<div class="card sched">', month = -1;

@@ -64,17 +64,18 @@ function logout(text) {
   lock(false); msg('mClock', '');
   store('dh_pin', null); store('dh_id', null); CODE = null; NAME = ''; myPinClose();
   $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
-  AD = null; CASH = null; cashArm = ''; cashPh = []; qPh = []; cashPr = ''; prRepair = null; REP = null; repPh = []; repArm = ''; CHK = null; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
+  AD = null; CASH = null; cashArm = ''; cashPh = []; qPh = []; cashPr = ''; prRepair = null; REP = null; repPh = []; repArm = ''; CHK = null; CAL = null; DUTY = null; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
   if (!$('lname').value) $('lname').value = store('dh_lastname') || '';
   ($('lname').value ? $('pin') : $('lname')).focus();
 }
 
 function tab(t) {
-  ['clock', 'report', 'schedule', 'news', 'lead'].forEach(function (x) {
+  ['clock', 'check', 'report', 'schedule', 'news', 'lead'].forEach(function (x) {
     $(x).classList.toggle('hide', x !== t);
     $('tab-' + x).classList.toggle('on', x === t);
   });
-  if (t === 'schedule') load();
+  if (t === 'check' && typeof chkLoad === 'function') { CHK_HOST = 'chkStaff'; chkRender(); chkLoad('chkStaff'); }
+  if (t === 'schedule') { load(); if (schedMode === 'cal') calLoad('calStaff'); }
   if (t === 'news') newsSeen();
   if (t === 'lead') leadStart();
 }
@@ -133,7 +134,10 @@ function applyStatus(r) {
     $('sIn').textContent = r.clock['簽到'] || '—';
     $('sOut').textContent = r.clock['簽退'] || '—';
     FEST = r.fest || [];
+    DUTY = r.duty || null;
+    $('dutyStaff').innerHTML = dutyCard(DUTY, r.today);
     $('festStaff').innerHTML = festCard(FEST, r.today);
+    var oa = $('sa0') && $('sa0').options[0]; if (oa) oa.textContent = dutyArea() ? '區域（' + dutyArea() + '）' : '區域';
     renderSchedule(r.schedule, r.today, r.days || 60);
     renderNews(r.news);
     if (!$('news').classList.contains('hide')) newsSeen();
@@ -156,7 +160,7 @@ function festDays(ds, today) { return Math.round((new Date(ds + 'T00:00:00') - n
 function festCard(list, today) {
   var soon = (list || []).filter(function (x) { var n = festDays(x.date, today); return n >= 0 && n <= 14; }).slice(0, 5);
   if (!soon.length) return '';
-  return '<div class="card fest"><h3 class="ah">🏮 近期節日</h3>' + soon.map(function (x) {
+  return '<div class="card fest"><h3 class="ah">🏮 近期節日與活動</h3>' + soon.map(function (x) {
     var n = festDays(x.date, today), d = new Date(x.date + 'T00:00:00');
     var when = n === 0 ? '今天' : n === 1 ? '明天' : '還有 ' + n + ' 天';
     return '<div class="frow' + (n <= x.lead ? ' near' : '') + '"><div><b>' + (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）</b> <small>' + esc(x.lunar) + '</small></div>'
@@ -165,8 +169,83 @@ function festCard(list, today) {
   }).join('') + '</div>';
 }
 function festTag(ds) {
-  var f = FEST.filter(function (x) { return x.date === ds; })[0];
-  return f ? '<div class="ftag">🏮 ' + esc(f.lunar) + '・' + esc(f.name) + '</div>' : '';
+  return FEST.filter(function (x) { return x.date === ds; }).map(function (f) {
+    return '<div class="ftag">' + calIcon(f) + ' ' + (f.lunar ? esc(f.lunar) + '・' : '') + esc(f.name) + '</div>';
+  }).join('');
+}
+
+// ===== 住廟輪值（「輪值」「區域」分頁）=====
+var DUTY = null;
+function dutyArea() { return DUTY && DUTY.cur ? DUTY.cur.area : ''; }
+function md(ds) { return ds ? ds.slice(5).replace(/^0/, '').replace('-0', '-').replace('-', '/') : ''; }
+function dutyCard(d, today) {
+  if (!d || (!d.cur && !d.next)) return '';
+  var c = d.cur, n = d.next, h = '<div class="card duty"><h3 class="ah">🔁 本週住廟輪值</h3>';
+  var who = function (x) {
+    return (x.lead ? '<small>負責前賢：' + esc(x.lead) + '</small>' : '') + (x.svc ? '<small>服務：' + esc(x.svc) + '</small>' : '') + (x.phone ? '<small>電話：' + esc(x.phone) + '</small>' : '');
+  };
+  if (c) h += '<div class="drow"><b>' + esc(c.area) + '</b><span>' + md(c.start) + ' 晚上～' + md(c.end) + ' 晚上</span></div>' + who(c);
+  else h += '<div class="empty">目前沒有輪值資料</div>';
+  if (n) h += '<div class="dnext">' + (c && c.end === today ? '<span class="tonight">今晚換：' + esc(n.area) + '</span>' : '下一區：<b>' + esc(n.area) + '</b>（' + md(n.start) + ' 晚上交接）') + who(n) + '</div>';
+  return h + '</div>';
+}
+
+// ===== 行事曆：今天起一年（節日、班程、打掃、輪值）=====
+var CAL = null, CAL_HOST = '', calFilter = 'all', schedMode = 'sched';
+function schedSeg(m) {
+  schedMode = m;
+  $('sg-sched').classList.toggle('on', m === 'sched'); $('sg-cal').classList.toggle('on', m === 'cal');
+  $('schedList').classList.toggle('hide', m !== 'sched'); $('calStaff').classList.toggle('hide', m !== 'cal');
+  if (m === 'cal') calLoad('calStaff');
+}
+function calLoad(host) {
+  CAL_HOST = host; calRender();
+  var who = CODE;
+  return apiPost({ action: 'cal', u: CODE }).then(function (r) {
+    if (CODE !== who) return;
+    CAL = r; calRender();
+  }).catch(function (e) { if (!CAL && $(CAL_HOST)) $(CAL_HOST).innerHTML = '<div class="card"><div class="empty">⚠️ ' + esc(e.message === 'Failed to fetch' ? '網路異常' : e.message) + '</div></div>'; });
+}
+function calKind(f) {
+  var t = f.types || [];
+  if (t.indexOf('打掃') >= 0 || /打掃/.test(f.name)) return '打掃';
+  if (t.indexOf('大型班程') >= 0 || t.indexOf('班程') >= 0 || t.indexOf('提示') >= 0) return '班程';
+  return '節日';
+}
+function calIcon(f) { return { '打掃': '🧹', '班程': '📣', '節日': '🏮' }[calKind(f)]; }
+function calRender() {
+  if (!CAL_HOST || !$(CAL_HOST)) return;
+  $(CAL_HOST).innerHTML = calHtml();
+}
+function calHtml() {
+  if (!CAL) return '<div class="card"><div class="empty">行事曆載入中…</div></div>';
+  var ev = [];
+  CAL.fest.forEach(function (f) { ev.push({ date: f.date, kind: calKind(f), f: f }); });
+  CAL.duty.forEach(function (d) { ev.push({ date: d.start < CAL.today ? CAL.today : d.start, kind: '輪值', d: d }); });
+  ev.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.kind === '輪值' ? -1 : 1); });
+  var kinds = [['all', '全部'], ['節日', '🏮 節日'], ['班程', '📣 班程'], ['輪值', '🔁 輪值'], ['打掃', '🧹 打掃']];
+  var h = '<div class="card cal"><div class="calf">' + kinds.map(function (k) {
+    return '<button class="' + (calFilter === k[0] ? 'on' : '') + '" onclick="calFilter=\'' + k[0] + '\';calRender()">' + k[1] + '</button>'; }).join('') + '</div>';
+  var month = '', n = 0;
+  ev.forEach(function (e) {
+    if (calFilter !== 'all' && e.kind !== calFilter) return;
+    var d = new Date(e.date + 'T00:00:00'), m = e.date.slice(0, 7);
+    if (m !== month) { month = m; h += '<div class="mon">' + d.getFullYear() + ' 年 ' + (d.getMonth() + 1) + ' 月</div>'; }
+    n++;
+    var left = '<div class="cd"><b>' + (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）</b>' + (e.f && e.f.lunar ? '<small>' + esc(e.f.lunar) + '</small>' : '') + '</div>';
+    if (e.d) {
+      var x = e.d;
+      h += '<div class="crow">' + left + '<div class="cn"><span class="ct 輪值">輪值</span><b>' + esc(x.area) + '</b> <small>' + md(x.start) + ' 晚～' + md(x.end) + ' 晚</small>'
+         + (x.lead || x.svc ? '<small>' + (x.lead ? '負責前賢 ' + esc(x.lead) : '') + (x.svc ? '｜服務 ' + esc(x.svc) : '') + '</small>' : '')
+         + (x.note && /推算/.test(x.note) ? '<small>（' + esc(x.note) + '）</small>' : '') + '</div></div>';
+    } else {
+      var f = e.f;
+      h += '<div class="crow">' + left + '<div class="cn"><span class="ct ' + e.kind + '">' + e.kind + '</span><b>' + esc(f.name) + '</b>' + (f.rite ? ' <small>' + esc(f.rite) + '</small>' : '')
+         + (f.prep ? '<details><summary>準備事項</summary>' + esc(f.prep).replace(/\n/g, '<br>') + '</details>' : '') + '</div></div>';
+    }
+  });
+  if (!n) h += '<div class="empty">沒有資料</div>';
+  return h + '<small>輪值、打掃依法會行程表；之後的輪值依順序推算，下一期行程表出來再修正（試算表「輪值」「節日」分頁）</small></div>';
 }
 
 // 班表：今天起 N 天，每天一列；點按鈕登記／取消自己的班
@@ -292,7 +371,7 @@ function seg(t) {
 // 住廟回報：10 列，左邊選區域、右邊填姓名；空白列不送出。日期＝送出當天
 function buildStay(keep) {
   var old = keep ? stayValues(true) : [];
-  var opts = '<option value="">區域</option>' + AREAS.map(function (a) { return '<option>' + esc(a) + '</option>'; }).join('');
+  var opts = '<option value="">' + (dutyArea() ? '區域（' + esc(dutyArea()) + '）' : '區域') + '</option>' + AREAS.map(function (a) { return '<option>' + esc(a) + '</option>'; }).join('');
   var html = '';
   for (var i = 0; i < STAY_ROWS; i++) {
     html += '<div class="srow"><span class="n">' + (i + 1) + '</span><select id="sa' + i + '">' + opts + '</select>'
@@ -315,6 +394,8 @@ function sendStay() {
   var rows = stayValues(false);
   var bad = rows.filter(function (r) { return !r.name || !r.area; });
   if (!rows.length) { msg('mStay', '請至少填一位', 'err'); return; }
+  rows.forEach(function (r) { if (r.name && !r.area && dutyArea()) r.area = dutyArea(); });   // 沒選區域：用本週輪值區
+  bad = rows.filter(function (r) { return !r.name || !r.area; });
   if (bad.length) { msg('mStay', '有列只填了區域或姓名，請補齊或清空', 'err'); return; }
   lock(true); msg('mStay', '送出中…');
   apiPost({ action: 'stay', u: CODE, rows: rows })
