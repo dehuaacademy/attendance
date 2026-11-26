@@ -146,7 +146,7 @@ function startCached() {
   try { r = JSON.parse(store(cacheKey('st')) || 'null'); } catch (e) {}
   if (!r) { show('app'); return; }
   if (r.role === 'admin' || r.role === 'viewer') { adminStart(r); return; }
-  if (r.today !== todayStr()) { r.today = todayStr(); r.clock = { 簽到: null, 簽退: null }; }   // 昨天的打卡不要顯示
+  if (r.today !== todayStr()) { r.today = todayStr(); r.clock = { 簽到: null, 簽退: null }; }   // 昨天的簽到退不要顯示
   show('app'); applyStatus(r);
 }
 
@@ -203,7 +203,7 @@ function shiftOp(date, op, btn) {
 function alertMsg(t) { var m = $('mSched'); m.textContent = t; m.className = 'msg err'; setTimeout(function () { m.textContent = ''; }, 4000); }
 function esc(s) { return String(s || '').replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
 
-// ===== 打卡 =====
+// ===== 簽到／簽退 =====
 function getLoc(cb0) {
   // 有些手機在定位授權視窗沒關掉時，兩個回呼都不會發生；20 秒後一律放行（後台標「未取得定位」）
   var done = false, cb = function (a, b) { if (!done) { done = true; cb0(a, b); } };
@@ -228,7 +228,7 @@ function clock(type) {
     if (CODE !== who) return;
     if (err === 'denied') {
       lock(false);
-      msg('mClock', '請允許「位置」權限後再打卡（手機設定 → 瀏覽器 → 位置）', 'err');
+      msg('mClock', '請允許「位置」權限後再簽到退（手機設定 → 瀏覽器 → 位置）', 'err');
       return;
     }
     // 取不到定位（逾時）仍送出，後台標示「未取得定位」
