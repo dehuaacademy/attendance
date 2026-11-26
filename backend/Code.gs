@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '6.1';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.2';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -60,6 +60,7 @@ var SHEETS = {
   news:     { name: '公告',     header: ['時間', '發布者', '標題', '內容', '送達手機數'] },
   cash:     { name: '零用金',   header: ['編號', '建立時間', '日期', '類型', '金額', '科目', '說明', '經手人', '收據1', '收據2', '收據3', '狀態', '核准金額', '核准人', '核准時間', '核對人', '核對時間', '還款時間', '備註', '請購單號'] },
   preq:     { name: '請購',     header: ['編號', '建立時間', '申請人', '品項', '說明', '預估金額', '科目', '報價1', '報價2', '報價3', '單一報價理由', '報修單號', '狀態', '核准人', '核准時間', '備註', '記帳編號'] },
+  locs:     { name: '報修地點', header: ['大項', '小區域'] },
   repairs:  { name: '報修',     header: ['編號', '建立時間', '回報人', '地點', '狀況', '緊急', '照片1', '照片2', '照片3', '狀態', '處理人', '更新時間', '處理說明', '請購單號'] },
   stats:    { name: '統計',     header: ['月份', '姓名', '排班天數', '出勤天數', '實際出勤時數', '缺簽退天數', '更新時間'] }
 };
@@ -93,7 +94,7 @@ var PUSH_DESC = { '組員': '公告、缺人提醒和報修結果', '組長': '�
 // App 裡任何寫入都會立刻清掉相關快取；直接改試算表會由 onEdit 清掉全部快取
 var CACHE_TTL = 600;
 var CK = { users: 'c_users', settings: 'c_settings', shifts: 'c_shifts_', news: 'c_news_', clock: 'c_clock_',
-           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash', preq: 'c_preq', repairs: 'c_repairs' };   // 結尾是 _ 的會加上今天日期
+           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash', preq: 'c_preq', repairs: 'c_repairs', locs: 'c_locs' };   // 結尾是 _ 的會加上今天日期
 var _users = null, _bustKeys = [];
 function cache_(key, loader) {
   var c = CacheService.getScriptCache(), v = null;
@@ -1038,21 +1039,42 @@ function repairRows_() {
              photos: [r[6], r[7], r[8]].filter(String), status: r[9], handler: r[10], updated: r[11], result: r[12], pr: r[13] };
   }).filter(function (x) { return x.id; });
 }
+// 報修地點：「報修地點」分頁（大項｜小區域），管理者可以直接在試算表增刪；分頁是空的時候寫入預設清單
+var LOC_SEED = [["德化宮", "無極宮3F"], ["德化宮", "頂樓"], ["德化宮", "3F乾道側內廊"], ["德化宮", "3F乾道側外廊"], ["德化宮", "3F坤道側內廊"], ["德化宮", "3F坤道側外廊"], ["德化宮", "3F陽台"], ["德化宮", "坤道前賢休息室3F"], ["德化宮", "張老點傳師休息室3F"], ["德化宮", "乾道前賢休息室3F"], ["德化宮", "2F（整層）"], ["德化宮", "2F乾道側內廊"], ["德化宮", "2F乾道側外廊"], ["德化宮", "2F坤道側內廊"], ["德化宮", "2F坤道側外廊"], ["德化宮", "2F陽台"], ["德化宮", "會議室2F"], ["德化宮", "廚房1F"], ["德化宮", "餐廳1F"], ["德化宮", "電梯"], ["德化宮", "乾道寢室"], ["德化宮", "乾道浴廁"], ["德化宮", "坤道寢室"], ["德化宮", "坤道浴廁"], ["德化宮", "文書室"], ["德化宮", "文書室浴廁"], ["德化宮", "藏經閣"], ["彌勒院", "頂樓"], ["彌勒院", "仙德樓3F"], ["彌勒院", "3F陽台"], ["彌勒院", "3F乾道浴廁"], ["彌勒院", "3F坤道浴廁"], ["彌勒院", "1F（整層）"], ["彌勒院", "1F乾道浴廁"], ["彌勒院", "1F坤道浴廁"], ["彌勒院", "1F外廊"], ["彌勒院", "地下室"], ["彌勒院", "MB01"], ["彌勒院", "MB02"], ["彌勒院", "MB03"], ["彌勒院", "MB04"], ["彌勒院", "WB01"], ["彌勒院", "WB02"], ["彌勒院", "WB03"], ["彌勒院", "WB04"], ["彌勒院", "M503"], ["彌勒院", "M501"], ["彌勒院", "M301"], ["彌勒院", "M203"], ["彌勒院", "M201"], ["彌勒院", "乾道沙發區"], ["彌勒院", "W503"], ["彌勒院", "W502"], ["彌勒院", "W501"], ["彌勒院", "W302"], ["彌勒院", "W301"], ["彌勒院", "W203"], ["彌勒院", "W202"], ["彌勒院", "W201"], ["彌勒院", "坤道木椅區"], ["懷恩祠", "1F主殿"], ["懷恩祠", "1F乾道側區域"], ["懷恩祠", "1F坤道側區域"], ["懷恩祠", "1F後側區域"], ["懷恩祠", "1F乾道側浴廁"], ["懷恩祠", "1F坤道側浴廁"], ["守衛室", "辦公區"], ["守衛室", "住宿區"], ["守衛室", "浴廁區"], ["戶外", "牌樓大門"], ["戶外", "舊大門"], ["戶外", "德化宮乾道側雨棚區"], ["戶外", "德化宮坤道側雨棚區"], ["戶外", "德化宮乾道寢室前花圃"], ["戶外", "德化宮坤道寢室前花圃"], ["戶外", "龍池"], ["戶外", "花園廣場"], ["戶外", "花園步道區"], ["戶外", "德化宮側停車場"], ["戶外", "彌勒院前廣場"], ["戶外", "彌勒院旁器材室"], ["戶外", "彌勒院側停車場"], ["戶外", "守衛室旁停車場"]];
+function locsData_() {
+  return cache_(CK.locs, function () {
+    var sh = sheet_('locs');
+    if (sh.getLastRow() < 2) sh.getRange(2, 1, LOC_SEED.length, 2).setValues(LOC_SEED);
+    var out = [];
+    sh.getRange(2, 1, sh.getLastRow() - 1, 2).getDisplayValues().forEach(function (r) {
+      var a = String(r[0]).trim(), b = String(r[1]).trim();
+      if (!a) return;
+      var g = out.filter(function (x) { return x.area === a; })[0];
+      if (!g) { g = { area: a, spots: [] }; out.push(g); }
+      if (b && g.spots.indexOf(b) < 0) g.spots.push(b);
+    });
+    return out;
+  });
+}
 function repairData_() { return cache_(CK.repairs, function () { return repairRows_().slice(-200); }); }
 function repair_(b) {
   var me = auth_(b.u), op = b.op, handle = me.role === '組長' || me.role === '管理者', c = cfg_();
   if (op === 'list') {
     var rows = repairData_().slice().reverse();
     rows.forEach(function (e) { delete e.row; });
-    return { me: { name: me.name, role: me.role }, canHandle: handle, canRequest: cashCaps_(me.role).request, today: day_(0), rows: rows };
+    return { me: { name: me.name, role: me.role }, canHandle: handle, canRequest: cashCaps_(me.role).request, today: day_(0), rows: rows, locs: locsData_() };
   }
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     var sh = sheet_('repairs'), stamp = "'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm'), note = String(b.note || '').trim().slice(0, 300), res;
     if (op === 'add') {
-      var loc = String(b.loc || '').trim().slice(0, 40), text = String(b.text || '').trim().slice(0, 500);
-      if (!loc) throw new Error('請填地點（哪裡壞了）');
+      // 地點＝大項／小區域（＋補充）；舊版前台只送 loc
+      var area = String(b.area || '').trim(), spot = String(b.spot || '').trim(), more = String(b.more || '').trim().slice(0, 40);
+      var loc = area ? area + (spot ? '／' + spot : '') + (more ? '（' + more + '）' : '') : String(b.loc || '').trim().slice(0, 60);
+      var text = String(b.text || '').trim().slice(0, 500);
+      if (!loc) throw new Error('請選地點（哪裡壞了）');
+      if (area === '其他' && !more) throw new Error('選「其他」時請寫地點');
       if (!text) throw new Error('請填狀況');
       var photos = Array.isArray(b.photos) ? b.photos : [], urgent = !!b.urgent;
       var id = newId_('R', repairRows_()), links = savePhotos_(photos, me.name, '報修');
