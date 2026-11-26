@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '6.0';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.1';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -58,7 +58,9 @@ var SHEETS = {
   stay:     { name: '住廟回報', header: ['送出日期', '送出時間', '回報人', '區域', '姓名', '伺服器時間戳記'] },
   devices:  { name: '推播裝置', header: ['Token', '姓名', '角色', '裝置', '登記時間', '最後更新', '狀態'] },
   news:     { name: '公告',     header: ['時間', '發布者', '標題', '內容', '送達手機數'] },
-  cash:     { name: '零用金',   header: ['編號', '建立時間', '日期', '類型', '金額', '科目', '說明', '經手人', '收據1', '收據2', '收據3', '狀態', '核准金額', '核准人', '核准時間', '核對人', '核對時間', '還款時間', '備註'] },
+  cash:     { name: '零用金',   header: ['編號', '建立時間', '日期', '類型', '金額', '科目', '說明', '經手人', '收據1', '收據2', '收據3', '狀態', '核准金額', '核准人', '核准時間', '核對人', '核對時間', '還款時間', '備註', '請購單號'] },
+  preq:     { name: '請購',     header: ['編號', '建立時間', '申請人', '品項', '說明', '預估金額', '科目', '報價1', '報價2', '報價3', '單一報價理由', '報修單號', '狀態', '核准人', '核准時間', '備註', '記帳編號'] },
+  repairs:  { name: '報修',     header: ['編號', '建立時間', '回報人', '地點', '狀況', '緊急', '照片1', '照片2', '照片3', '狀態', '處理人', '更新時間', '處理說明', '請購單號'] },
   stats:    { name: '統計',     header: ['月份', '姓名', '排班天數', '出勤天數', '實際出勤時數', '缺簽退天數', '更新時間'] }
 };
 
@@ -72,9 +74,10 @@ var SETTINGS = [
   ['推播：排班異動', '是',  '是／否'],
   ['推播：缺人檢查', '是',  '是／否（每天 8 點檢查未來 7 天；管理者和同仁都會收到）'],
   ['推播：ntfy',     '是',  '是／否（舊的 ntfy 通知；App 推播穩定後可以關掉）'],
-  ['推播：零用金',   '是',  '是／否（支出、待核准、撥款、低餘額通知）'],
+  ['推播：零用金',   '是',  '是／否（請購、支出、撥款、低餘額通知）'],
+  ['推播：報修',     '是',  '是／否（新報修通知組長和管理者；緊急的也通知執行長；完成時通知回報人）'],
   ['零用金科目',     '香燭供品,供果供品,食材,清潔用品,水電修繕,交通,餐點,文具,雜支', '用逗號分隔'],
-  ['零用金核准門檻(元)', '5000', '超過這個金額要先申請，執行長核准後才能花'],
+  ['零用金核准門檻(元)', '5000', '支出或代墊超過這個金額，要先開請購單，執行長核准後才能記帳'],
   ['免核准科目',     '供果供品', '這些科目超過門檻也不用核准，用逗號分隔'],
   ['零用金低餘額(元)', '2000', '組長手上餘額低於這個數字時通知組長、財務、管理者']
 ];
@@ -83,14 +86,14 @@ var _cfg = null;
 // ===== 角色 =====
 var ROLES = ['組員', '組長', '前賢', '執行長', '財務', '管理者'];
 var VIEW_ROLES = ['前賢', '執行長', '財務'];     // 唯讀看出勤（排班、回報、公告）
-var PUSH_DESC = { '組員': '公告和缺人提醒', '組長': '簽到退、異常回報、缺人提醒、零用金和公告', '前賢': '公告和異常回報',
-                  '執行長': '公告和零用金核准', '財務': '公告和零用金', '管理者': '簽到退、異常回報、缺人提醒和零用金' };
+var PUSH_DESC = { '組員': '公告、缺人提醒和報修結果', '組長': '簽到退、異常回報、缺人提醒、報修、財務和公告', '前賢': '公告和異常回報',
+                  '執行長': '公告、請購核准和緊急報修', '財務': '公告和財務', '管理者': '簽到退、異常回報、缺人提醒、報修和財務' };
 
 // ===== 快取：讀試算表很慢（每次 0.2–0.5 秒），常用資料放在 Script Cache 最多 10 分鐘 =====
 // App 裡任何寫入都會立刻清掉相關快取；直接改試算表會由 onEdit 清掉全部快取
 var CACHE_TTL = 600;
 var CK = { users: 'c_users', settings: 'c_settings', shifts: 'c_shifts_', news: 'c_news_', clock: 'c_clock_',
-           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash' };   // 結尾是 _ 的會加上今天日期
+           reports: 'c_reports', stays: 'c_stays', dev: 'c_dev', photos: 'c_photos', cash: 'c_cash', preq: 'c_preq', repairs: 'c_repairs' };   // 結尾是 _ 的會加上今天日期
 var _users = null, _bustKeys = [];
 function cache_(key, loader) {
   var c = CacheService.getScriptCache(), v = null;
@@ -151,6 +154,7 @@ function cfg_() {
     ntfy: String(map['ntfy頻道'] || '').trim(),
     mailTo: String(map['備援Email'] || '').trim(),
     nCash: map['推播：零用金'] !== '否',
+    nRepair: map['推播：報修'] !== '否',
     cashCats: splitList_(map['零用金科目']),
     cashLimit: Number(map['零用金核准門檻(元)']) || 5000,
     cashExempt: splitList_(map['免核准科目']),
@@ -181,6 +185,7 @@ function doPost(e) {
     if (body.action === 'photo')  return photo_(body);
     if (body.action === 'thumbs') return thumbs_(body);
     if (body.action === 'cash')   return cash_(body);
+    if (body.action === 'repair') return repair_(body);
     if (body.action === 'me')     return me_(body);
     throw new Error('未知的操作');
   });
@@ -767,27 +772,42 @@ function push_(b) {
   return { registered: true };
 }
 
-// ===== 零用金 =====
-// 一本帳：撥入（財務→組長，餘額＋）、繳回（組長→財務，餘額－）、支出（組長用零用金付）、代墊（組員自己先付，組長之後還）
-// 超過門檻（預設 5000）且不是免核准科目（預設供果供品）→ 先「申請」，執行長核准後才花，花完補收據
-// 狀態：待核准 → 已核准 →（補收據）→ 待核對 → 已核對；代墊：待還款 →（組長還款）→ 待核對 → 已核對；退回、作廢不計入
-// 組長手上餘額 ＝ 撥入 − 繳回 − 支出（已核准／待核對／已核對）− 代墊（已還款，即待核對／已核對）
-var CASH_COLS = 19;
+// ===== 財務：零用金帳本＋請購＋財務直付 =====
+// 帳本類型：撥入（財務→組長，餘額＋）、繳回（組長→財務，餘額－）、支出（組長用零用金付）、代墊（組員先付，組長之後還）、
+//           直付（財務直接付給廠商，不經過零用金，不影響組長餘額）
+// 請購：花錢前先申請，附至少 2 家報價（只有 1 家要填理由），每張都要執行長核准；核准後記帳時選這張請購單，請購變「已採購」
+// 支出／代墊超過門檻（預設 5000，免核准科目除外）一定要選已核准的請購單；直付由財務自己把關，請購單可選可不選
+// 帳本狀態：支出 待核對 → 已核對；代墊 待還款 →（組長還款）→ 待核對 → 已核對；直付 已付款；撥入／繳回 已入帳；作廢不計入
+// 組長手上餘額 ＝ 撥入 − 繳回 − 支出（待核對／已核對）− 代墊（待核對／已核對，即已還款）
+// （v5.9 舊流程的「待核准／已核准」帳本列仍照舊計算，新版不再產生）
+var CASH_COLS = 20;
 var CASH_SPENT = { '支出': ['已核准', '待核對', '已核對'], '代墊': ['待核對', '已核對'] };
 function cashCaps_(role) {
   var adm = role === '管理者';
   return {
     spend: adm || role === '組長', advance: adm || role === '組長' || role === '組員', fund: adm || role === '財務',
+    direct: adm || role === '財務', request: adm || role === '組長' || role === '組員',
     approve: role === '執行長', check: adm || role === '財務', repay: adm || role === '組長', all: role !== '組員'
   };
 }
+function num_(v) { return Number(String(v).replace(/[^\d.-]/g, '')) || 0; }
 function cashRows_() {
   var sh = sheet_('cash'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
   return sh.getRange(2, 1, n, CASH_COLS).getDisplayValues().map(function (r, i) {
-    return { row: i + 2, id: r[0], created: r[1], date: normDate_(r[2]), type: r[3], amount: Number(String(r[4]).replace(/[^\d.-]/g, '')) || 0,
+    return { row: i + 2, id: r[0], created: r[1], date: normDate_(r[2]), type: r[3], amount: num_(r[4]),
              cat: r[5], note: r[6], by: r[7], photos: [r[8], r[9], r[10]].filter(String), status: r[11],
-             apprAmt: r[12], apprBy: r[13], apprAt: r[14], checkBy: r[15], checkAt: r[16], repaidAt: r[17], remark: r[18] };
+             apprAmt: r[12], apprBy: r[13], apprAt: r[14], checkBy: r[15], checkAt: r[16], repaidAt: r[17], remark: r[18], pr: r[19] };
+  }).filter(function (x) { return x.id; });
+}
+var PREQ_COLS = 17;
+function preqRows_() {
+  var sh = sheet_('preq'), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  return sh.getRange(2, 1, n, PREQ_COLS).getDisplayValues().map(function (r, i) {
+    return { row: i + 2, id: r[0], created: r[1], by: r[2], item: r[3], note: r[4], est: num_(r[5]), cat: r[6],
+             quotes: [r[7], r[8], r[9]].filter(String), reason: r[10], repair: r[11], status: r[12],
+             apprBy: r[13], apprAt: r[14], remark: r[15], cash: r[16] };
   }).filter(function (x) { return x.id; });
 }
 function cashDelta_(e) {
@@ -803,21 +823,31 @@ function cashData_() {
     return { balance: bal, rows: all.slice(-300) };
   });
 }
+function preqData_() { return cache_(CK.preq, function () { return preqRows_().slice(-200); }); }
 function cashBig_(amount, cat) { var c = cfg_(); return amount > c.cashLimit && c.cashExempt.indexOf(cat) < 0; }
-function cashSavePhotos_(photos, name) {
+// 補上新版加的欄位名稱（舊試算表的標題列比較短）
+function ensureHeader_(key) {
+  var sh = sheet_(key), h = SHEETS[key].header, cur = sh.getRange(1, 1, 1, h.length).getDisplayValues()[0];
+  if (cur[h.length - 1] !== h[h.length - 1]) {
+    sh.getRange(1, 1, 1, h.length).setValues([h]);
+  }
+  return sh;
+}
+function savePhotos_(photos, name, label) {
   var links = ['', '', ''];
   if (!photos.length) return links;
-  if (photos.length > CONFIG.MAX_PHOTOS) throw new Error('收據照片最多 ' + CONFIG.MAX_PHOTOS + ' 張');
+  if (photos.length > CONFIG.MAX_PHOTOS) throw new Error('照片最多 ' + CONFIG.MAX_PHOTOS + ' 張');
   var now = new Date(), folder = monthFolder_(now), stamp = fmt_(now, 'yyyyMMdd_HHmmss');
   photos.forEach(function (p, i) {
     var data = String(p).replace(/^data:image\/\w+;base64,/, '');
     if (data.length > CONFIG.MAX_PHOTO_CHARS) throw new Error('第 ' + (i + 1) + ' 張照片太大');
-    links[i] = folder.createFile(Utilities.newBlob(Utilities.base64Decode(data), 'image/jpeg', stamp + '_收據_' + name + '_' + (i + 1) + '.jpg')).getUrl();
+    links[i] = folder.createFile(Utilities.newBlob(Utilities.base64Decode(data), 'image/jpeg', stamp + '_' + label + '_' + name + '_' + (i + 1) + '.jpg')).getUrl();
   });
   return links;
 }
-function cashNotify_(title, body, roles, names) {
-  if (!cfg_().nCash) return;
+// 推播給指定角色和指定的人（只走 FCM）。flag＝設定裡的推播開關
+function notifyTo_(flag, title, body, roles, names) {
+  if (!flag) return;
   try {
     var seen = {}, list = devices_(null).filter(function (d) {
       if (seen[d.token] || (roles.indexOf(d.role) < 0 && (names || []).indexOf(d.name) < 0)) return false;
@@ -826,23 +856,33 @@ function cashNotify_(title, body, roles, names) {
     fcm_(list, title, body, 'cash');
   } catch (e) {}
 }
+function cashNotify_(title, body, roles, names) { notifyTo_(cfg_().nCash, title, body, roles, names); }
 function money_(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+function newId_(prefix, rows) {
+  var used = {}, id, now = new Date();
+  rows.forEach(function (x) { used[x.id] = 1; });
+  do { id = prefix + fmt_(now, 'yyMMddHHmmss') + Math.floor(Math.random() * 900 + 100); } while (used[id]);
+  return id;
+}
 
 function cash_(b) {
   var me = auth_(b.u), caps = cashCaps_(me.role), c = cfg_(), op = b.op;
   if (op === 'list') {
-    var d = cashData_(), rows = d.rows.slice().reverse();
-    if (!caps.all) rows = rows.filter(function (e) { return e.by === me.name; });
-    rows.forEach(function (e) { delete e.row; });
+    var d = cashData_(), rows = d.rows.slice().reverse(), pr = preqData_().slice().reverse();
+    if (!caps.all) {
+      rows = rows.filter(function (e) { return e.by === me.name; });
+      pr = pr.filter(function (e) { return e.by === me.name; });
+    }
+    rows.forEach(function (e) { delete e.row; }); pr.forEach(function (e) { delete e.row; });
     return { me: { name: me.name, role: me.role }, caps: caps, balance: caps.all ? d.balance : null, low: c.cashLow,
-             limit: c.cashLimit, exempt: c.cashExempt, cats: c.cashCats, today: day_(0), rows: rows };
+             limit: c.cashLimit, exempt: c.cashExempt, cats: c.cashCats, today: day_(0), rows: rows, preqs: pr };
   }
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    var sh = sheet_('cash'), before = cashData_().balance, now = new Date(), stamp = "'" + fmt_(now, 'yyyy-MM-dd HH:mm');
-    var res = cashWrite_(b, me, caps, c, sh, now, stamp);
-    bust_(['cash', 'photos']);
+    var before = cashData_().balance, now = new Date(), stamp = "'" + fmt_(now, 'yyyy-MM-dd HH:mm');
+    var res = /^p/.test(op) ? preqWrite_(b, me, caps, c, stamp) : cashWrite_(b, me, caps, c, ensureHeader_('cash'), now, stamp);
+    bust_(['cash', 'preq', 'photos', 'repairs']);
     var after = 0; cashRows_().forEach(function (e) { after += cashDelta_(e); });
     if (before >= c.cashLow && after < c.cashLow)
       cashNotify_('⚠️ 零用金餘額剩 ' + money_(after) + ' 元', '低於 ' + money_(c.cashLow) + ' 元，請財務撥款', ['組長', '財務', '管理者']);
@@ -851,72 +891,106 @@ function cash_(b) {
   } finally { lock.releaseLock(); }
 }
 
+// ---- 請購 ----
+function preqWrite_(b, me, caps, c, stamp) {
+  var op = b.op, note = String(b.note || '').trim().slice(0, 300), sh = sheet_('preq');
+  if (op === 'padd') {
+    if (!caps.request) throw new Error('沒有權限開請購單');
+    var item = String(b.item || '').trim().slice(0, 60), est = Math.round(Number(b.est)), cat = String(b.cat || '');
+    if (!item) throw new Error('請填品項（要買什麼、修什麼）');
+    if (!(est > 0 && est <= 10000000)) throw new Error('請填預估金額');
+    if (c.cashCats.indexOf(cat) < 0) throw new Error('請選擇科目');
+    var quotes = Array.isArray(b.quotes) ? b.quotes : [], reason = String(b.reason || '').trim().slice(0, 200);
+    if (quotes.length < 2 && !reason) throw new Error('請附至少 2 家報價；只有 1 家或沒有報價，請填原因');
+    var rep = String(b.repair || ''), repair = null;
+    if (rep) { repair = repairRows_().filter(function (x) { return x.id === rep; })[0]; if (!repair) throw new Error('找不到報修單 ' + rep); }
+    var id = newId_('P', preqRows_()), links = savePhotos_(quotes, me.name, '報價');
+    sh.appendRow([id, stamp, me.name, item, note, est, cat, links[0], links[1], links[2], reason, rep, '待核准', '', '', '', '']);
+    if (repair) {
+      var rs = sheet_('repairs');
+      rs.getRange(repair.row, 14).setValue(id);
+      if (repair.status === '待處理') rs.getRange(repair.row, 10, 1, 3).setValues([['處理中', me.name, stamp]]);
+    }
+    log_(me.name, '請購', item + ' ' + money_(est) + ' 元（報價 ' + quotes.length + ' 家）');
+    cashNotify_('📝 待核准請購：' + me.name + ' ' + item + ' ' + money_(est) + ' 元', '報價 ' + quotes.length + ' 家' + (reason ? '（' + reason + '）' : '') + (note ? '\n' + note : ''), ['執行長', '管理者']);
+    return { id: id, status: '待核准' };
+  }
+  var p = preqRows_().filter(function (x) { return x.id === String(b.id || ''); })[0];
+  if (!p) throw new Error('找不到這張請購單，請重新整理');
+  if (op === 'papprove' || op === 'preject') {
+    if (!caps.approve) throw new Error('只有執行長可以核准');
+    if (p.status !== '待核准') throw new Error('這張已經是「' + p.status + '」');
+    if (op === 'preject' && !note) throw new Error('請填退回原因');
+    var st = op === 'papprove' ? '已核准' : '退回';
+    sh.getRange(p.row, 13, 1, 3).setValues([[st, me.name, stamp]]);
+    if (note) sh.getRange(p.row, 16).setValue(note);
+    log_(me.name, st === '已核准' ? '核准請購' : '退回請購', p.by + ' ' + p.item + ' ' + money_(p.est) + (note ? '（' + note + '）' : ''));
+    cashNotify_((st === '已核准' ? '✅ 請購已核准：' : '❌ 請購退回：') + p.item + ' ' + money_(p.est) + ' 元',
+                st === '已核准' ? '可以採購了，付款後記帳時選這張請購單' : '原因：' + note, ['組長', '管理者'], [p.by]);
+    return { status: st };
+  }
+  if (op === 'pvoid') {
+    var mine = p.by === me.name && ['待核准', '已核准'].indexOf(p.status) >= 0;
+    var adm = me.role === '管理者' && ['已採購', '作廢'].indexOf(p.status) < 0;
+    if (!mine && !adm) throw new Error(p.status === '已採購' ? '已採購的請購單請作廢對應的帳目' : '只有申請人可以作廢');
+    if (!note) throw new Error('請填作廢原因');
+    sh.getRange(p.row, 13).setValue('作廢');
+    sh.getRange(p.row, 16).setValue(note);
+    log_(me.name, '作廢請購', p.item + '（' + note + '）');
+    return { status: '作廢' };
+  }
+  throw new Error('未知的請購操作');
+}
+
+// ---- 帳本 ----
 function cashWrite_(b, me, caps, c, sh, now, stamp) {
   var op = b.op, note = String(b.note || '').trim().slice(0, 200);
   if (op === 'add') {
     var type = b.type, amount = Math.round(Number(b.amount));
-    if (!(amount > 0 && amount <= 1000000)) throw new Error('金額請填 1 到 1,000,000');
+    if (!(amount > 0 && amount <= 10000000)) throw new Error('請填金額');
     var date = normDate_(b.date) || day_(0);
+    if (date > day_(0)) throw new Error('日期不能是未來');
     var photos = Array.isArray(b.photos) ? b.photos : [];
-    var cat = '', status;
+    var cat = '', status, prId = String(b.pr || ''), pr = null;
     if (type === '撥入' || type === '繳回') {
       if (!caps.fund) throw new Error('只有財務可以撥款或登記繳回');
-      if (date > day_(0)) throw new Error('日期不能是未來');
-      status = '已入帳';
-    } else if (type === '支出' || type === '代墊') {
+      status = '已入帳'; prId = '';
+    } else if (type === '支出' || type === '代墊' || type === '直付') {
       if (type === '支出' && !caps.spend) throw new Error('支出由組長登記；自己先付的請選「代墊」');
       if (type === '代墊' && !caps.advance) throw new Error('沒有權限登記代墊');
+      if (type === '直付' && !caps.direct) throw new Error('財務直付只有財務可以登記');
       cat = String(b.cat || '');
       if (c.cashCats.indexOf(cat) < 0) throw new Error('請選擇科目');
       if (!note) throw new Error('請填說明（買了什麼）');
-      var big = cashBig_(amount, cat);
-      if (!big && date > day_(0)) throw new Error('日期不能是未來');
-      status = big ? '待核准' : type === '支出' ? '待核對' : '待還款';
+      if (prId) {
+        pr = preqRows_().filter(function (x) { return x.id === prId; })[0];
+        if (!pr) throw new Error('找不到請購單 ' + prId);
+        if (pr.status !== '已核准') throw new Error('請購單「' + pr.item + '」目前是' + pr.status + '，不能記帳');
+      } else if (type !== '直付' && cashBig_(amount, cat)) {
+        throw new Error('超過 ' + money_(c.cashLimit) + ' 元要先開請購單，執行長核准後，記帳時選那張請購單');
+      }
+      status = type === '支出' ? '待核對' : type === '代墊' ? '待還款' : '已付款';
     } else throw new Error('類型錯誤');
-    var links = cashSavePhotos_(photos, me.name);
-    var used = {}, id;
-    cashRows_().forEach(function (x) { used[x.id] = 1; });
-    do { id = 'C' + fmt_(now, 'yyMMddHHmmss') + Math.floor(Math.random() * 900 + 100); } while (used[id]);
-    sh.appendRow([id, stamp, "'" + date, type, amount, cat, note, me.name, links[0], links[1], links[2], status, '', '', '', '', '', '', '']);
-    log_(me.name, '零用金' + type, money_(amount) + ' ' + cat + ' ' + note + '（' + status + '）');
-    var t = money_(amount) + ' 元';
-    if (status === '待核准') cashNotify_('📝 待核准：' + me.name + ' 申請' + type + ' ' + t, cat + '・' + note, ['執行長', '管理者']);
-    else if (type === '撥入') cashNotify_('💰 零用金撥入 ' + t, me.name + (note ? '：' + note : ''), ['組長', '管理者']);
+    var links = savePhotos_(photos, me.name, '收據');
+    var id = newId_('C', cashRows_());
+    sh.appendRow([id, stamp, "'" + date, type, amount, cat, note, me.name, links[0], links[1], links[2], status, '', '', '', '', '', '', '', prId]);
+    if (pr) {
+      var ps = sheet_('preq');
+      ps.getRange(pr.row, 13).setValue('已採購');
+      ps.getRange(pr.row, 17).setValue(id);
+    }
+    log_(me.name, '財務' + type, money_(amount) + ' ' + cat + ' ' + note + '（' + status + '）' + (prId ? ' 請購 ' + prId : ''));
+    var t = money_(amount) + ' 元', over = pr && amount > pr.est ? '\n⚠️ 超過請購預估 ' + money_(pr.est) + ' 元' : '';
+    if (type === '撥入') cashNotify_('💰 零用金撥入 ' + t, me.name + (note ? '：' + note : ''), ['組長', '管理者']);
     else if (type === '繳回') cashNotify_('↩️ 零用金繳回 ' + t, me.name + (note ? '：' + note : ''), ['組長', '財務', '管理者']);
-    else cashNotify_('🧾 ' + me.name + ' ' + type + ' ' + t, cat + '・' + note + (links[0] ? '' : '（沒有收據照片）'), ['財務', '管理者']);
+    else if (type === '直付') cashNotify_('🏦 財務直付 ' + t, cat + '・' + note + over, ['管理者'].concat(pr ? ['組長'] : []), pr ? [pr.by] : []);
+    else cashNotify_('🧾 ' + me.name + ' ' + type + ' ' + t, cat + '・' + note + (links[0] ? '' : '（沒有收據照片）') + over, ['財務', '管理者']);
     return { id: id, status: status };
   }
 
   var e = cashRows_().filter(function (x) { return x.id === String(b.id || ''); })[0];
   if (!e) throw new Error('找不到這筆紀錄，請重新整理');
   var amt = money_(e.amount) + ' 元';
-
-  if (op === 'approve' || op === 'reject') {
-    if (!caps.approve) throw new Error('只有執行長可以核准');
-    if (e.status !== '待核准') throw new Error('這筆已經是「' + e.status + '」');
-    if (op === 'reject' && !note) throw new Error('請填退回原因');
-    sh.getRange(e.row, 12, 1, 4).setValues([[op === 'approve' ? '已核准' : '退回', e.amount, me.name, stamp]]);
-    if (note) sh.getRange(e.row, 19).setValue(note);
-    log_(me.name, op === 'approve' ? '核准零用金' : '退回零用金', e.by + ' ' + amt + ' ' + e.note + (note ? '（' + note + '）' : ''));
-    cashNotify_(op === 'approve' ? '✅ 已核准：' + e.by + ' ' + amt : '❌ 退回：' + e.by + ' ' + amt,
-                e.cat + '・' + e.note + (op === 'approve' ? '\n花完後請在 App 補上收據' : '\n原因：' + note), ['組長', '管理者'], [e.by]);
-    return { status: op === 'approve' ? '已核准' : '退回' };
-  }
-  if (op === 'receipt') {
-    if (e.status !== '已核准') throw new Error('這筆不需要補收據');
-    if (e.by !== me.name && !caps.repay) throw new Error('只有申請人或組長可以補收據');
-    var real = Math.round(Number(b.amount));
-    if (!(real > 0 && real <= 1000000)) throw new Error('請填實際金額');
-    var ph = Array.isArray(b.photos) ? b.photos : [];
-    if (!ph.length) throw new Error('請拍收據');
-    var lk = cashSavePhotos_(ph, e.by), ns = e.type === '支出' ? '待核對' : '待還款';
-    sh.getRange(e.row, 5).setValue(real);
-    sh.getRange(e.row, 9, 1, 4).setValues([[lk[0], lk[1], lk[2], ns]]);
-    if (note) sh.getRange(e.row, 19).setValue(note);
-    log_(me.name, '零用金補收據', e.by + ' ' + money_(real) + ' 元（核准 ' + money_(e.amount) + '）');
-    cashNotify_('🧾 ' + e.by + ' ' + e.type + ' ' + money_(real) + ' 元（已核准）', e.cat + '・' + e.note + (real > e.amount ? '\n⚠️ 超過核准金額 ' + money_(e.amount) : ''), ['財務', '管理者']);
-    return { status: ns };
-  }
   if (op === 'repay') {
     if (!caps.repay) throw new Error('只有組長可以登記還款');
     if (e.type !== '代墊' || e.status !== '待還款') throw new Error('這筆不是待還款的代墊');
@@ -932,20 +1006,90 @@ function cashWrite_(b, me, caps, c, sh, now, stamp) {
     sh.getRange(e.row, 12).setValue('已核對');
     sh.getRange(e.row, 16, 1, 2).setValues([[me.name, stamp]]);
     if (note) sh.getRange(e.row, 19).setValue(note);
-    log_(me.name, '核對零用金', e.by + ' ' + amt + ' ' + e.note);
+    log_(me.name, '核對帳目', e.by + ' ' + amt + ' ' + e.note);
     return { status: '已核對' };
   }
   if (op === 'void') {
-    var mine = e.by === me.name && ['待核准', '已核准', '待核對', '待還款', '已入帳'].indexOf(e.status) >= 0;
+    var mine = e.by === me.name && ['待核准', '已核准', '待核對', '待還款', '已入帳', '已付款'].indexOf(e.status) >= 0;
     var adm = me.role === '管理者' && ['已核對', '作廢'].indexOf(e.status) < 0;
     if (!mine && !adm) throw new Error(e.status === '已核對' ? '已核對的紀錄不能作廢' : '只有登記的人可以作廢');
     if (!note) throw new Error('請填作廢原因');
     sh.getRange(e.row, 12).setValue('作廢');
     sh.getRange(e.row, 19).setValue(note);
-    log_(me.name, '作廢零用金', e.by + ' ' + e.type + ' ' + amt + '（' + note + '）');
+    if (e.pr) {   // 請購單退回「已核准」，可以重新記帳
+      var p2 = preqRows_().filter(function (x) { return x.id === e.pr && x.cash === e.id; })[0];
+      if (p2) { sheet_('preq').getRange(p2.row, 13).setValue('已核准'); sheet_('preq').getRange(p2.row, 17).setValue(''); }
+    }
+    log_(me.name, '作廢帳目', e.by + ' ' + e.type + ' ' + amt + '（' + note + '）');
     return { status: '作廢' };
   }
-  throw new Error('未知的零用金操作');
+  throw new Error('未知的財務操作');
+}
+
+// ===== 報修 =====
+// 任何角色都可以報修；組長、管理者處理（開始處理、完成）；回報人可以取消自己還沒處理的
+// 要花錢時從報修單開請購單，報修單記下請購單號
+var REPAIR_COLS = 14;
+function repairRows_() {
+  var sh = sheet_('repairs'), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  return sh.getRange(2, 1, n, REPAIR_COLS).getDisplayValues().map(function (r, i) {
+    return { row: i + 2, id: r[0], created: r[1], by: r[2], loc: r[3], text: r[4], urgent: r[5] === '緊急',
+             photos: [r[6], r[7], r[8]].filter(String), status: r[9], handler: r[10], updated: r[11], result: r[12], pr: r[13] };
+  }).filter(function (x) { return x.id; });
+}
+function repairData_() { return cache_(CK.repairs, function () { return repairRows_().slice(-200); }); }
+function repair_(b) {
+  var me = auth_(b.u), op = b.op, handle = me.role === '組長' || me.role === '管理者', c = cfg_();
+  if (op === 'list') {
+    var rows = repairData_().slice().reverse();
+    rows.forEach(function (e) { delete e.row; });
+    return { me: { name: me.name, role: me.role }, canHandle: handle, canRequest: cashCaps_(me.role).request, today: day_(0), rows: rows };
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = sheet_('repairs'), stamp = "'" + fmt_(new Date(), 'yyyy-MM-dd HH:mm'), note = String(b.note || '').trim().slice(0, 300), res;
+    if (op === 'add') {
+      var loc = String(b.loc || '').trim().slice(0, 40), text = String(b.text || '').trim().slice(0, 500);
+      if (!loc) throw new Error('請填地點（哪裡壞了）');
+      if (!text) throw new Error('請填狀況');
+      var photos = Array.isArray(b.photos) ? b.photos : [], urgent = !!b.urgent;
+      var id = newId_('R', repairRows_()), links = savePhotos_(photos, me.name, '報修');
+      sh.appendRow([id, stamp, me.name, loc, text, urgent ? '緊急' : '一般', links[0], links[1], links[2], '待處理', '', stamp, '', '']);
+      log_(me.name, '報修', loc + '：' + text.slice(0, 50));
+      notifyTo_(c.nRepair, (urgent ? '🚨 緊急報修：' : '🔧 報修：') + loc, me.name + '：' + text.slice(0, 150) + (photos.length ? '\n附照片 ' + photos.length + ' 張' : ''),
+                urgent ? ['組長', '管理者', '執行長'] : ['組長', '管理者']);
+      res = { id: id, status: '待處理' };
+    } else {
+      var e = repairRows_().filter(function (x) { return x.id === String(b.id || ''); })[0];
+      if (!e) throw new Error('找不到這張報修單，請重新整理');
+      if (op === 'start') {
+        if (!handle) throw new Error('由組長處理報修');
+        if (e.status !== '待處理') throw new Error('這張已經是「' + e.status + '」');
+        sh.getRange(e.row, 10, 1, 3).setValues([['處理中', me.name, stamp]]);
+        log_(me.name, '開始處理報修', e.loc);
+        res = { status: '處理中' };
+      } else if (op === 'done') {
+        if (!handle) throw new Error('由組長處理報修');
+        if (['待處理', '處理中'].indexOf(e.status) < 0) throw new Error('這張已經是「' + e.status + '」');
+        if (!note) throw new Error('請填處理結果');
+        sh.getRange(e.row, 10, 1, 4).setValues([['已完成', e.handler || me.name, stamp, note]]);
+        log_(me.name, '報修完成', e.loc + '：' + note.slice(0, 50));
+        notifyTo_(c.nRepair, '✅ 報修已完成：' + e.loc, note.slice(0, 150), [], [e.by]);
+        res = { status: '已完成' };
+      } else if (op === 'cancel') {
+        var ok = (e.by === me.name && e.status === '待處理') || (handle && ['待處理', '處理中'].indexOf(e.status) >= 0);
+        if (!ok) throw new Error('只有回報人可以取消還沒處理的報修');
+        if (!note) throw new Error('請填取消原因');
+        sh.getRange(e.row, 10, 1, 4).setValues([['取消', e.handler, stamp, note]]);
+        log_(me.name, '取消報修', e.loc + '（' + note + '）');
+        res = { status: '取消' };
+      } else throw new Error('未知的報修操作');
+    }
+    bust_(['repairs', 'photos']);
+    return res;
+  } finally { lock.releaseLock(); }
 }
 
 // 回報照片：在 App 裡直接看（照片仍是私人檔案，只透過後台、憑 PIN 讀取）
@@ -958,10 +1102,11 @@ function photoIds_() {
     sh.getRange(st, 7, last - st + 1, 3).getDisplayValues().forEach(function (r) {
       r.forEach(function (u) { var m = String(u).match(/\/d\/([-\w]{20,})/); if (m) ids[m[1]] = 1; });
     });
-    // 零用金收據：記下經手人，組員只能看自己的收據
-    cashData_().rows.forEach(function (e) {
-      e.photos.forEach(function (u) { var m = String(u).match(/\/d\/([-\w]{20,})/); if (m) ids[m[1]] = e.by || 1; });
-    });
+    // 收據、報價：記下經手人，組員只能看自己的；報修照片大家都能看（'*'）
+    function add(list, who) { list.forEach(function (u) { var m = String(u).match(/\/d\/([-\w]{20,})/); if (m) ids[m[1]] = who; }); }
+    cashData_().rows.forEach(function (e) { add(e.photos, e.by || 1); });
+    preqData_().forEach(function (e) { add(e.quotes, e.by || 1); });
+    repairData_().forEach(function (e) { add(e.photos, '*'); });
     return ids;
   });
 }
@@ -970,7 +1115,7 @@ function photo_(b) {
   var who = auth_(b.u);
   var id = String(b.id || ''), own = photoIds_()[id];
   if (!/^[-\w]{20,}$/.test(id) || !own) throw new Error('找不到這張照片');
-  if (PHOTO_ROLES.indexOf(who.role) < 0 && own !== who.name) throw new Error('沒有權限看照片');
+  if (PHOTO_ROLES.indexOf(who.role) < 0 && own !== who.name && own !== '*') throw new Error('沒有權限看照片');
   var blob = DriveApp.getFileById(id).getBlob();
   var bytes = blob.getBytes();
   if (bytes.length > 4000000) throw new Error('照片太大，請到雲端硬碟查看');
@@ -982,7 +1127,7 @@ function photo_(b) {
 function thumbs_(b) {
   var who = auth_(b.u);
   var ok = photoIds_(), all = PHOTO_ROLES.indexOf(who.role) >= 0;
-  var ids = (b.ids || []).map(String).filter(function (id) { return /^[-\w]{20,}$/.test(id) && ok[id] && (all || ok[id] === who.name); }).slice(0, 30);
+  var ids = (b.ids || []).map(String).filter(function (id) { return /^[-\w]{20,}$/.test(id) && ok[id] && (all || ok[id] === who.name || ok[id] === '*'); }).slice(0, 30);
   if (!all && !ids.length && (b.ids || []).length) throw new Error('沒有權限看照片');
   var map = {}, c = CacheService.getScriptCache(), got = {};
   if (!ids.length) return { map: map };
