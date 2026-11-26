@@ -1,9 +1,9 @@
 /**
  * 德化廟務 App（德化宮 廟務總管小組）｜簽到退＋回報＋自選排班＋管理者／組長／前賢介面＋App 推播與公告 後台（v5.3）
- * 這份程式碼放在公開的 GitHub（dehuaacademy/attendance/backend），不可寫入任何密碼或頻道名稱。
+ * 這份程式碼放在公開的 GitHub（dehuaacademy/dehua-temple-management/backend；2026-11-26 前叫 attendance），不可寫入任何密碼或頻道名稱。
  * 更新方式：推到 GitHub 後，由獨立的「德化更新器」自動安裝並更新部署（見維護說明）。
  * 綁定在試算表「德化 廟務紀錄」上（雲端硬碟資料夾「廟務總管｜Temple Managers」），部署成網頁應用程式，只回傳資料（JSON），不負責畫面。
- * 前台網頁放在 GitHub Pages：https://dehuaacademy.github.io/attendance/
+ * 前台網頁放在 GitHub Pages：https://dehuaacademy.github.io/dehua-temple-management/
  *
  * 試算表分頁：
  *   人員     PIN｜姓名｜啟用（是／否）｜角色（組員／組長／前賢／執行長／財務／管理者）（舊資料的「員工」視同組員）
@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '6.5.1';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.5.2';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -43,7 +43,7 @@ var CONFIG = {
   STAY_MAX_ROWS: 30,
   // App 推播（Firebase Cloud Messaging）。專案 ID 不是密碼，可以放這裡
   FCM_PROJECT_ID: 'dehua-temple-managers-ap-ab58a',
-  APP_URL: 'https://dehuaacademy.github.io/attendance/',
+  APP_URL: 'https://dehuaacademy.github.io/dehua-temple-management/',
   NEWS_DAYS: 60,              // App 顯示幾天內的公告
   NEWS_MAX: 20
 };

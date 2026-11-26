@@ -64,9 +64,19 @@ function enablePush(btn, msgId) {
 // 每次打開 App：已允許通知的手機，自動更新登記（換人使用、代碼更新、每天一次）
 function syncPush() {
   if (!CODE || !pushReady() || !pushSupported() || Notification.permission !== 'granted') return;
+  cleanOldSw();
   pushToken().then(function (tok) {
-    if (tok === store('dh_push_tok') && store('dh_push_for') === CODE && Date.now() - (+store('dh_push_at') || 0) < 86400000) return;
+    var old = store('dh_push_tok');
+    if (old && old !== tok && CODE) apiPost({ action: 'push', u: CODE, token: old, op: 'remove' }).catch(function () {});   // 換網址或換 token：舊的登記拿掉，避免收到兩次
+    if (tok === old && store('dh_push_for') === CODE && Date.now() - (+store('dh_push_at') || 0) < 86400000) return;
     return apiPost({ action: 'push', u: CODE, token: tok, device: deviceName() }).then(function () { rememberPush(tok); renderPushCards(); });
+  }).catch(function () {});
+}
+// 2026-11-26 網址從 /attendance/ 改成 /dehua-temple-management/：舊網址的推播背景程式移除
+function cleanOldSw() {
+  if (!navigator.serviceWorker || !navigator.serviceWorker.getRegistrations) return;
+  navigator.serviceWorker.getRegistrations().then(function (list) {
+    list.forEach(function (r) { if (/\/attendance\/$/.test(r.scope)) r.unregister(); });
   }).catch(function () {});
 }
 // 切換使用者：這支手機先停止收原本那個人的通知
