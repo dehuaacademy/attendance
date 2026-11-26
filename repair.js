@@ -1,11 +1,11 @@
 // ===== 報修 =====
 // 組員：回報 →「報修」；組長：管理 →「報修」；其他角色：上方「報修」分頁
-var REP = null, REP_HOST = '', repWho = '', repArm = '', repPh = [], repShowDone = false;
+var REP = null, REP_HOST = '', repWho = '', repArm = '', repPh = [], repShowDone = false, repArea = '', repSpot = '';
 
 function repOpen(host) { REP_HOST = host; repRender(); repLoad(); }
 function repLoad() {
   var who = CODE;
-  if (REP && repWho !== who) REP = null;
+  if (REP && repWho !== who) { REP = null; repArea = ''; repSpot = ''; }
   return apiPost({ action: 'repair', op: 'list', u: CODE }).then(function (r) {
     if (CODE !== who) return;
     var same = REP && JSON.stringify(REP) === JSON.stringify(r);
@@ -19,18 +19,32 @@ function repActive() {
   return typeof adTab !== 'undefined' && adTab === 'repair' && (REP_HOST !== 'leadBody' || ROLE === 'leader');
 }
 function repVisible() { return repActive() && $(REP_HOST).offsetParent !== null; }
-function repTyping() { return repPh.length || ['rpLoc', 'rpText', 'rpNote'].some(function (id) { return $(id) && $(id).value; }); }
+function repTyping() { return repPh.length || repArea || ['rpMore', 'rpText', 'rpNote'].some(function (id) { return $(id) && $(id).value; }); }
 function repRender() {
   if (!repActive()) return;
+  if (!repKeepVals && $('rpText')) repKeep();
   $(REP_HOST).innerHTML = repHtml();
+  if (repKeepVals) { $('rpMore').value = repKeepVals.more; $('rpText').value = repKeepVals.text; $('rpUrgent').checked = repKeepVals.urgent; repKeepVals = null; }
   renderRepPh();
   if (typeof loadThumbs === 'function') loadThumbs();
 }
 
 var REP_TAG = { '待處理': 'bad', '處理中': 'mid', '已完成': 'ok', '取消': 'mid' };
+// 地點：大項 → 小區域 →（補充，例如哪一台冷氣）
+function locHtml() {
+  var locs = (REP && REP.locs) || [], g = locs.filter(function (x) { return x.area === repArea; })[0];
+  var h = '<label>地點</label><div class="srow2"><select id="rpArea" onchange="repArea=this.value;repSpot=\'\';repKeep();repRender()"><option value="">大項</option>'
+    + locs.map(function (x) { return '<option' + (x.area === repArea ? ' selected' : '') + '>' + esc(x.area) + '</option>'; }).join('')
+    + '<option' + (repArea === '其他' ? ' selected' : '') + '>其他</option></select>';
+  if (g && g.spots.length) h += '<select id="rpSpot" onchange="repSpot=this.value"><option value="">小區域</option>'
+    + g.spots.map(function (x) { return '<option' + (x === repSpot ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select>';
+  return h + '</div><input id="rpMore" maxlength="40" placeholder="' + (repArea === '其他' ? '請寫地點' : '補充位置（可空白，例如：靠窗那台冷氣）') + '">';
+}
+// 換大項時重畫表單，保留已填的文字和緊急勾選
+var repKeepVals = null;
+function repKeep() { repKeepVals = { more: $('rpMore') ? $('rpMore').value : '', text: $('rpText') ? $('rpText').value : '', urgent: $('rpUrgent') ? $('rpUrgent').checked : false }; }
 function repHtml() {
-  var h = '<div class="card"><h3 class="ah">報修</h3>'
-    + '<input id="rpLoc" maxlength="40" placeholder="地點：哪裡、什麼東西（例如大殿冷氣）">'
+  var h = '<div class="card"><h3 class="ah">報修</h3>' + locHtml()
     + '<textarea id="rpText" maxlength="500" style="min-height:90px" placeholder="狀況：怎麼了"></textarea>'
     + '<label class="chk"><input type="checkbox" id="rpUrgent"> 緊急（會影響安全或明天的活動）</label>'
     + '<label>照片（最多 3 張，可不附）</label><div class="photos" id="rpPhotos"></div>'
@@ -82,11 +96,13 @@ function repOp(op, id) {
   repSend({ op: op, id: id, note: note }, { start: '已開始處理', done: '已結案', cancel: '已取消' }[op]).catch(function () {});
 }
 function repAdd() {
-  var x = { op: 'add', loc: $('rpLoc').value.trim(), text: $('rpText').value.trim(), urgent: $('rpUrgent').checked, photos: repPh };
-  if (!x.loc) { toast('⚠️ 請填地點'); return; }
+  var x = { op: 'add', area: repArea, spot: $('rpSpot') ? $('rpSpot').value : '', more: $('rpMore').value.trim(), text: $('rpText').value.trim(), urgent: $('rpUrgent').checked, photos: repPh };
+  if (!x.area) { toast('⚠️ 請選地點大項'); return; }
+  if (x.area === '其他' && !x.more) { toast('⚠️ 請寫地點'); $('rpMore').focus(); return; }
+  if ($('rpSpot') && !x.spot && !x.more) { toast('⚠️ 請選小區域，或在補充位置寫清楚'); return; }
   if (!x.text) { toast('⚠️ 請填狀況'); return; }
   repSend(x, x.urgent ? '緊急報修已送出，已通知組長' : '報修已送出').then(function () {
-    repPh = []; $('rpLoc').value = ''; $('rpText').value = ''; repRender();
+    repPh = []; repArea = ''; repSpot = ''; $('rpMore').value = ''; $('rpText').value = ''; $('rpUrgent').checked = false; repRender();
   }).catch(function () {});
 }
 // 從報修開請購：跳到財務 → 請購，表單帶入這張報修單
