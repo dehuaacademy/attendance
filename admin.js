@@ -194,7 +194,8 @@ function adDevice(name) {
 // ---- 今日 ----
 function adToday() {
   var t = AD.today;
-  var h = '<div id="chkAdmin"></div><div class="card"><h3 class="ah">簽到／簽退</h3>';
+  FEST = AD.fest || [];
+  var h = festCard(FEST, t) + '<div id="chkAdmin"></div><div class="card"><h3 class="ah">簽到／簽退</h3>';
   if (!AD.clock.length) h += '<div class="empty">今天還沒有人簽到</div>';
   AD.clock.forEach(function (c) {
     var tag = c.inRange === '是' ? '<span class="ok">範圍內</span>' : c.inRange === '否' ? '<span class="bad">範圍外 ' + esc(c.dist) + 'm</span>' : '<span class="mid">' + esc(c.inRange) + '</span>';
@@ -212,6 +213,7 @@ function adToday() {
 // ---- 排班 ----
 var schedOpen = '';
 function adSched() {
+  FEST = AD.fest || [];
   var by = {};
   AD.schedule.forEach(function (s) { (by[s.date] = by[s.date] || []).push(s); });
   var base = new Date(AD.today + 'T00:00:00'), h = '<div class="card sched">', month = -1;
@@ -226,7 +228,7 @@ function adSched() {
            + (ROLE === 'viewer' ? '' : ' <a class="x" onclick="adShiftCancel(' + q + ')">×</a>') + '</span>';
     }).join('') || (i > 0 && i <= 7 ? '<span class="gap">缺人</span>' : '<span class="none">尚無人</span>');
     h += '<div class="row' + (d.getDay() === 0 || d.getDay() === 6 ? ' wk' : '') + '"><div class="dt"><b>' + (d.getMonth() + 1) + '/' + d.getDate() + '</b><small>' + (i === 0 ? '今天' : '週' + WEEK[d.getDay()]) + '</small></div>'
-       + '<div class="ppl">' + tags + '</div>' + (ROLE === 'viewer' ? '' : '<button class="op" onclick="adSchedOpen(\'' + ds + '\')">＋</button>') + '</div>';
+       + '<div class="ppl">' + festTag(ds) + tags + '</div>' + (ROLE === 'viewer' ? '' : '<button class="op" onclick="adSchedOpen(\'' + ds + '\')">＋</button>') + '</div>';
     if (schedOpen === ds) {
       h += '<div class="sform"><select id="sfName">' + staffOpts() + '</select>'
          + '<input id="sfStart" type="time" value="08:30"><input id="sfEnd" type="time" value="17:00">'

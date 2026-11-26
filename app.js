@@ -132,6 +132,8 @@ function applyStatus(r) {
     $('stayDate').textContent = r.today.slice(5).replace('-', '/') + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
     $('sIn').textContent = r.clock['簽到'] || '—';
     $('sOut').textContent = r.clock['簽退'] || '—';
+    FEST = r.fest || [];
+    $('festStaff').innerHTML = festCard(FEST, r.today);
     renderSchedule(r.schedule, r.today, r.days || 60);
     renderNews(r.news);
     if (!$('news').classList.contains('hide')) newsSeen();
@@ -146,6 +148,25 @@ function startCached() {
   if (r.role === 'admin' || r.role === 'viewer') { adminStart(r); return; }
   if (r.today !== todayStr()) { r.today = todayStr(); r.clock = { 簽到: null, 簽退: null }; }   // 昨天的打卡不要顯示
   show('app'); applyStatus(r);
+}
+
+// ===== 節日：簽到頁／今日頁的「近期節日」卡片，班表上的節日標籤 =====
+var FEST = [];
+function festDays(ds, today) { return Math.round((new Date(ds + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000); }
+function festCard(list, today) {
+  var soon = (list || []).filter(function (x) { var n = festDays(x.date, today); return n >= 0 && n <= 14; }).slice(0, 5);
+  if (!soon.length) return '';
+  return '<div class="card fest"><h3 class="ah">🏮 近期節日</h3>' + soon.map(function (x) {
+    var n = festDays(x.date, today), d = new Date(x.date + 'T00:00:00');
+    var when = n === 0 ? '今天' : n === 1 ? '明天' : '還有 ' + n + ' 天';
+    return '<div class="frow' + (n <= x.lead ? ' near' : '') + '"><div><b>' + (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）</b> <small>' + esc(x.lunar) + '</small></div>'
+      + '<div class="fn">' + esc(x.name) + (x.rite ? ' <small>' + esc(x.rite) + '</small>' : '') + '<span class="fw">' + when + '</span></div>'
+      + (x.prep ? '<small class="fp">準備：' + esc(x.prep) + '</small>' : '') + '</div>';
+  }).join('') + '</div>';
+}
+function festTag(ds) {
+  var f = FEST.filter(function (x) { return x.date === ds; })[0];
+  return f ? '<div class="ftag">🏮 ' + esc(f.lunar) + '・' + esc(f.name) + '</div>' : '';
 }
 
 // 班表：今天起 N 天，每天一列；點按鈕登記／取消自己的班
@@ -165,7 +186,7 @@ function renderSchedule(list, today, days) {
     if (!people.length) tags = i > 0 && i <= 7 ? '<span class="gap">缺人</span>' : '<span class="none">尚無人</span>';
     html += '<div class="row' + (d.getDay() === 0 || d.getDay() === 6 ? ' wk' : '') + '">'
          + '<div class="dt"><b>' + (d.getMonth() + 1) + '/' + d.getDate() + '</b><small>' + (i === 0 ? '今天' : '週' + WEEK[d.getDay()]) + '</small></div>'
-         + '<div class="ppl">' + tags + '</div>'
+         + '<div class="ppl">' + festTag(ds) + tags + '</div>'
          + '<button class="op' + (mine ? ' cancel' : '') + '" onclick="shiftOp(\'' + ds + '\',\'' + (mine ? 'cancel' : 'add') + '\',this)">'
          + (mine ? '取消' : '我要排') + '</button></div>';
   }

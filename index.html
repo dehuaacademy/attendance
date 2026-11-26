@@ -154,6 +154,12 @@
   .chkb.on{background:#e8f5e9;border-color:#2e7d32;color:#2e7d32;font-weight:700}.chkb small{display:block;font-size:11px;font-weight:400;opacity:.7}
   .chkx{width:100%}.chkx label{margin:4px 0}.chkx input{margin:0}.chkx .srow2{gap:6px}.chkx .sb{flex:none}
   .switch{float:right;margin-top:4px;background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:14px;padding:3px 10px;font:inherit;font-size:12px;font-weight:400}
+  .fest .frow{border-top:1px solid #eee;padding:8px 2px}.fest .frow:first-of-type{border-top:0}
+  .fest .frow.near{background:#fff8e6;border-radius:8px;padding:8px}
+  .fest .fn{font-weight:700;margin-top:2px}.fest .fn small{font-weight:400;opacity:.6;margin-left:4px}.fest .fw{float:right;font-size:13px;color:#b26a00;font-weight:400}
+  .fest .frow > div small{display:inline;margin-left:4px;opacity:.6;font-size:13px}
+  .fest .fp{display:block;font-size:13px;opacity:.75;margin-top:2px}
+  .ftag{flex-basis:100%;font-size:12px;color:#b26a00;margin-bottom:2px}
 </style>
 </head>
 <body>
@@ -195,6 +201,7 @@
       <button class="big in" id="btnIn" onclick="clock('簽到')">簽到</button>
       <button class="big out" id="btnOut" onclick="clock('簽退')">簽退</button>
       <div class="msg" id="mClock"></div>
+      <div id="festStaff"></div>
       <div id="chkStaff"></div>
     </section>
 
@@ -272,8 +279,8 @@
 <div id="lightbox" class="hide" onclick="closePhoto()"><img id="lbImg" alt=""><div id="lbMsg"></div></div>
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=17"></script>
-<script src="admin.js?v=12"></script>
+<script src="app.js?v=18"></script>
+<script src="admin.js?v=13"></script>
 <script src="check.js?v=1"></script>
 <script src="cash.js?v=2"></script>
 <script src="repair.js?v=2"></script>
