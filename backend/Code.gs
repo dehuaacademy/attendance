@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '6.4';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.5';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -60,8 +60,8 @@ var SHEETS = {
   chkLog:   { name: '檢核紀錄', header: ['日期', '區塊', '項目', '值', '人員', '時間'] },
   devices:  { name: '推播裝置', header: ['Token', '姓名', '角色', '裝置', '登記時間', '最後更新', '狀態'] },
   news:     { name: '公告',     header: ['時間', '發布者', '標題', '內容', '送達手機數'] },
-  cash:     { name: '零用金',   header: ['編號', '建立時間', '日期', '類型', '金額', '科目', '說明', '經手人', '收據1', '收據2', '收據3', '狀態', '核准金額', '核准人', '核准時間', '核對人', '核對時間', '還款時間', '備註', '請購單號'] },
-  preq:     { name: '請購',     header: ['編號', '建立時間', '申請人', '品項', '說明', '預估金額', '科目', '報價1', '報價2', '報價3', '單一報價理由', '報修單號', '狀態', '核准人', '核准時間', '備註', '記帳編號'] },
+  cash:     { name: '零用金',   header: ['編號', '建立時間', '日期', '類型', '金額', '科目', '說明', '經手人', '收據1', '收據2', '收據3', '狀態', '核准金額', '核准人', '核准時間', '核對人', '核對時間', '還款時間', '備註', '請購單號', '主體'] },
+  preq:     { name: '請購',     header: ['編號', '建立時間', '申請人', '品項', '說明', '預估金額', '科目', '報價1', '報價2', '報價3', '單一報價理由', '報修單號', '狀態', '核准人', '核准時間', '備註', '記帳編號', '主體'] },
   locs:     { name: '報修地點', header: ['大項', '小區域'] },
   fest:     { name: '節日',     header: ['日期', '農曆', '節日', '類型', '禮節', '備註'] },
   repairs:  { name: '報修',     header: ['編號', '建立時間', '回報人', '地點', '狀況', '緊急', '照片1', '照片2', '照片3', '狀態', '處理人', '更新時間', '處理說明', '請購單號'] },
@@ -84,7 +84,11 @@ var SETTINGS = [
   ['零用金科目',     '香燭供品,供果供品,食材,餐點,清潔用品,文具,水電修繕,設備,住宿寢具,佛具,活動班程,印刷文宣,交通,雜支', '用逗號分隔'],
   ['零用金核准門檻(元)', '5000', '支出或代墊超過這個金額，要先開請購單，執行長核准後才能記帳'],
   ['免核准科目',     '供果供品', '這些科目超過門檻也不用核准，用逗號分隔'],
-  ['零用金低餘額(元)', '2000', '組長手上餘額低於這個數字時通知組長、財務、管理者']
+  ['零用金低餘額(元)', '2000', '德化宮或基金會零用金現金低於這個數字時通知組長、財務、管理者'],
+  ['零用金額度：德化宮', '20000', '德化宮零用金固定額度（修繕、設備、住宿門禁、小額修繕）'],
+  ['零用金額度：基金會', '10000', '基金會零用金固定額度（供品、香、佛具、活動班程、文宣、行政、餐廚、清潔）'],
+  ['德化宮科目', '水電修繕,設備,住宿寢具,佛具', '記帳、請購時自動帶「德化宮」的科目，用逗號分隔'],
+  ['基金會科目', '香燭供品,供果供品,食材,餐點,清潔用品,文具,活動班程,印刷文宣', '自動帶「基金會」的科目；兩邊都沒列的科目（交通、雜支）要自己選主體']
 ];
 var _cfg = null;
 
@@ -164,7 +168,9 @@ function cfg_() {
     cashCats: splitList_(map['零用金科目']),
     cashLimit: Number(map['零用金核准門檻(元)']) || 5000,
     cashExempt: splitList_(map['免核准科目']),
-    cashLow: Number(map['零用金低餘額(元)']) || 2000
+    cashLow: Number(map['零用金低餘額(元)']) || 2000,
+    cashQuota: { '德化宮': Number(map['零用金額度：德化宮']) || 20000, '基金會': Number(map['零用金額度：基金會']) || 10000 },
+    entCats: { '德化宮': splitList_(map['德化宮科目']), '基金會': splitList_(map['基金會科目']) }
   };
   return _cfg;
 }
@@ -459,6 +465,7 @@ function dailyCheck() {
     if (!taken[d]) gaps.push(d.slice(5).replace('-', '/') + '（' + '日一二三四五六'.charAt(dow_(d)) + '）');
   }
   try { festCheck_(); } catch (e) {}
+  try { cashMonthly_(); } catch (e) {}
   if (gaps.length && cfg_().nGap) notify_('⚠️ 未來 ' + CONFIG.GAP_CHECK_DAYS + ' 天有 ' + gaps.length + ' 天沒人排班', gaps.join('、') + '\n打開 App「班表」就能登記', 4, 'all');
   updateStats();
 }
@@ -941,7 +948,14 @@ function push_(b) {
 // 帳本狀態：支出 待核對 → 已核對；代墊 待還款 →（組長還款）→ 待核對 → 已核對；直付 已付款；撥入／繳回 已入帳；作廢不計入
 // 組長手上餘額 ＝ 撥入 − 繳回 − 支出（待核對／已核對）− 代墊（待核對／已核對，即已還款）
 // （v5.9 舊流程的「待核准／已核准」帳本列仍照舊計算，新版不再產生）
-var CASH_COLS = 20;
+var CASH_COLS = 21;
+// v6.5 起零用金分「德化宮」「基金會」兩個主體，各自有固定額度；現金＋待補憑證＝額度
+// 主體預設依科目帶（設定「德化宮科目」「基金會科目」），交通、雜支等要自己選；財務核對時可以改
+var ENTITIES = ['德化宮', '基金會'];
+function entOfCat_(cat) {
+  var m = cfg_().entCats;
+  return ENTITIES.filter(function (k) { return m[k].indexOf(cat) >= 0; })[0] || '';
+}
 var CASH_SPENT = { '支出': ['已核准', '待核對', '已核對'], '代墊': ['待核對', '已核對'] };
 function cashCaps_(role) {
   var adm = role === '管理者';
@@ -958,17 +972,17 @@ function cashRows_() {
   return sh.getRange(2, 1, n, CASH_COLS).getDisplayValues().map(function (r, i) {
     return { row: i + 2, id: r[0], created: r[1], date: normDate_(r[2]), type: r[3], amount: num_(r[4]),
              cat: r[5], note: r[6], by: r[7], photos: [r[8], r[9], r[10]].filter(String), status: r[11],
-             apprAmt: r[12], apprBy: r[13], apprAt: r[14], checkBy: r[15], checkAt: r[16], repaidAt: r[17], remark: r[18], pr: r[19] };
+             apprAmt: r[12], apprBy: r[13], apprAt: r[14], checkBy: r[15], checkAt: r[16], repaidAt: r[17], remark: r[18], pr: r[19], ent: r[20] || entOfCat_(r[5]) };
   }).filter(function (x) { return x.id; });
 }
-var PREQ_COLS = 17;
+var PREQ_COLS = 18;
 function preqRows_() {
   var sh = sheet_('preq'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
   return sh.getRange(2, 1, n, PREQ_COLS).getDisplayValues().map(function (r, i) {
     return { row: i + 2, id: r[0], created: r[1], by: r[2], item: r[3], note: r[4], est: num_(r[5]), cat: r[6],
              quotes: [r[7], r[8], r[9]].filter(String), reason: r[10], repair: r[11], status: r[12],
-             apprBy: r[13], apprAt: r[14], remark: r[15], cash: r[16] };
+             apprBy: r[13], apprAt: r[14], remark: r[15], cash: r[16], ent: r[17] || entOfCat_(r[6]) };
   }).filter(function (x) { return x.id; });
 }
 function cashDelta_(e) {
@@ -979,10 +993,21 @@ function cashDelta_(e) {
 }
 function cashData_() {
   return cache_(CK.cash, function () {
-    var all = cashRows_(), bal = 0;
-    all.forEach(function (e) { bal += cashDelta_(e); });
-    return { balance: bal, rows: all.slice(-300) };
+    var all = cashRows_(), s = cashSum_(all);
+    return { balance: s.total, bal: s.bal, pend: s.pend, rows: all.slice(-300) };
   });
+}
+// 各主體的現金、待核對金額
+function cashSum_(all) {
+  var bal = {}, pend = {}, total = 0;
+  ENTITIES.forEach(function (k) { bal[k] = 0; pend[k] = 0; });
+  all.forEach(function (e) {
+    var d = cashDelta_(e), k = e.ent || '未指定';
+    if (!d) return;
+    total += d; bal[k] = (bal[k] || 0) + d;
+    if (e.status === '待核對') pend[k] = (pend[k] || 0) - d;
+  });
+  return { total: total, bal: bal, pend: pend };
 }
 function preqData_() { return cache_(CK.preq, function () { return preqRows_().slice(-200); }); }
 function cashBig_(amount, cat) { var c = cfg_(); return amount > c.cashLimit && c.cashExempt.indexOf(cat) < 0; }
@@ -1036,20 +1061,34 @@ function cash_(b) {
     }
     rows.forEach(function (e) { delete e.row; }); pr.forEach(function (e) { delete e.row; });
     return { me: { name: me.name, role: me.role }, caps: caps, balance: caps.all ? d.balance : null, low: c.cashLow,
+             bal: caps.all ? d.bal : null, pend: caps.all ? d.pend : null, quota: c.cashQuota, ents: ENTITIES, entCats: c.entCats,
              limit: c.cashLimit, exempt: c.cashExempt, cats: c.cashCats, today: day_(0), rows: rows, preqs: pr };
   }
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    var before = cashData_().balance, now = new Date(), stamp = "'" + fmt_(now, 'yyyy-MM-dd HH:mm');
+    var before = cashData_().bal, now = new Date(), stamp = "'" + fmt_(now, 'yyyy-MM-dd HH:mm');
     var res = /^p/.test(op) ? preqWrite_(b, me, caps, c, stamp) : cashWrite_(b, me, caps, c, ensureHeader_('cash'), now, stamp);
     bust_(['cash', 'preq', 'photos', 'repairs']);
-    var after = 0; cashRows_().forEach(function (e) { after += cashDelta_(e); });
-    if (before >= c.cashLow && after < c.cashLow)
-      cashNotify_('⚠️ 零用金餘額剩 ' + money_(after) + ' 元', '低於 ' + money_(c.cashLow) + ' 元，請財務撥款', ['組長', '財務', '管理者']);
-    res.balance = after;
+    var after = cashSum_(cashRows_());
+    ENTITIES.forEach(function (k) {
+      if ((before[k] || 0) >= c.cashLow && after.bal[k] < c.cashLow)
+        cashNotify_('⚠️ ' + k + '零用金剩 ' + money_(after.bal[k]) + ' 元', '低於 ' + money_(c.cashLow) + ' 元，請財務撥補（額度 ' + money_(c.cashQuota[k]) + ' 元）', ['組長', '財務', '管理者']);
+    });
+    res.balance = after.total;
     return res;
   } finally { lock.releaseLock(); }
+}
+
+// 每月 15 日提醒整理、20 日交帳（零用金憑證與現金餘額交中心財務／會計核對）
+function cashMonthly_() {
+  var dom = +day_(0).slice(8), c = cfg_();
+  if (dom !== 15 && dom !== 20) return;
+  var s = cashSum_(cashRows_()), lines = ENTITIES.map(function (k) {
+    return k + '：現金 ' + money_(s.bal[k]) + '、待補憑證 ' + money_(c.cashQuota[k] - s.bal[k]) + '（額度 ' + money_(c.cashQuota[k]) + '）';
+  });
+  cashNotify_(dom === 15 ? '📒 零用金 20 日前交帳，請開始整理' : '📒 今天零用金交帳',
+              lines.join('\n') + '\n兩個主體的憑證分開放信封，交中心財務／會計核對', ['組長', '財務', '管理者']);
 }
 
 // ---- 請購 ----
@@ -1061,19 +1100,22 @@ function preqWrite_(b, me, caps, c, stamp) {
     if (!item) throw new Error('請填品項（要買什麼、修什麼）');
     if (!(est > 0 && est <= 10000000)) throw new Error('請填預估金額');
     if (c.cashCats.indexOf(cat) < 0) throw new Error('請選擇科目');
+    var ent = ENTITIES.indexOf(b.ent) >= 0 ? b.ent : entOfCat_(cat);
+    if (!ent) throw new Error('請選擇主體（德化宮或基金會）');
     var quotes = Array.isArray(b.quotes) ? b.quotes : [], reason = String(b.reason || '').trim().slice(0, 200);
     if (quotes.length < 2 && !reason) throw new Error('請附至少 2 家報價；只有 1 家或沒有報價，請填原因');
     var rep = String(b.repair || ''), repair = null;
     if (rep) { repair = repairRows_().filter(function (x) { return x.id === rep; })[0]; if (!repair) throw new Error('找不到報修單 ' + rep); }
     var id = newId_('P', preqRows_()), links = savePhotos_(quotes, me.name, '報價');
-    sh.appendRow([id, stamp, me.name, item, note, est, cat, links[0], links[1], links[2], reason, rep, '待核准', '', '', '', '']);
+    sh = ensureHeader_('preq');
+    sh.appendRow([id, stamp, me.name, item, note, est, cat, links[0], links[1], links[2], reason, rep, '待核准', '', '', '', '', ent]);
     if (repair) {
       var rs = sheet_('repairs');
       rs.getRange(repair.row, 14).setValue(id);
       if (repair.status === '待處理') rs.getRange(repair.row, 10, 1, 3).setValues([['處理中', me.name, stamp]]);
     }
     log_(me.name, '請購', item + ' ' + money_(est) + ' 元（報價 ' + quotes.length + ' 家）');
-    cashNotify_('📝 待核准請購：' + me.name + ' ' + item + ' ' + money_(est) + ' 元', '報價 ' + quotes.length + ' 家' + (reason ? '（' + reason + '）' : '') + (note ? '\n' + note : ''), ['執行長', '管理者']);
+    cashNotify_('📝 待核准請購（' + ent + '）：' + me.name + ' ' + item + ' ' + money_(est) + ' 元', '報價 ' + quotes.length + ' 家' + (reason ? '（' + reason + '）' : '') + (note ? '\n' + note : ''), ['執行長', '管理者']);
     return { id: id, status: '待核准' };
   }
   var p = preqRows_().filter(function (x) { return x.id === String(b.id || ''); })[0];
@@ -1112,10 +1154,11 @@ function cashWrite_(b, me, caps, c, sh, now, stamp) {
     var date = normDate_(b.date) || day_(0);
     if (date > day_(0)) throw new Error('日期不能是未來');
     var photos = Array.isArray(b.photos) ? b.photos : [];
-    var cat = '', status, prId = String(b.pr || ''), pr = null;
+    var cat = '', status, prId = String(b.pr || ''), pr = null, ent = ENTITIES.indexOf(b.ent) >= 0 ? b.ent : '';
     if (type === '撥入' || type === '繳回') {
       if (!caps.fund) throw new Error('只有財務可以撥款或登記繳回');
       status = '已入帳'; prId = '';
+      if (!ent) throw new Error('請選擇撥給哪一個零用金（德化宮或基金會）');
     } else if (type === '支出' || type === '代墊' || type === '直付') {
       if (type === '支出' && !caps.spend) throw new Error('支出由組長登記；自己先付的請選「代墊」');
       if (type === '代墊' && !caps.advance) throw new Error('沒有權限登記代墊');
@@ -1130,22 +1173,24 @@ function cashWrite_(b, me, caps, c, sh, now, stamp) {
       } else if (type !== '直付' && cashBig_(amount, cat)) {
         throw new Error('超過 ' + money_(c.cashLimit) + ' 元要先開請購單，執行長核准後，記帳時選那張請購單');
       }
+      if (!ent) ent = (pr && pr.ent) || entOfCat_(cat);
+      if (!ent) throw new Error('「' + cat + '」要選主體：德化宮或基金會');
       status = type === '支出' ? '待核對' : type === '代墊' ? '待還款' : '已付款';
     } else throw new Error('類型錯誤');
     var links = savePhotos_(photos, me.name, '收據');
     var id = newId_('C', cashRows_());
-    sh.appendRow([id, stamp, "'" + date, type, amount, cat, note, me.name, links[0], links[1], links[2], status, '', '', '', '', '', '', '', prId]);
+    sh.appendRow([id, stamp, "'" + date, type, amount, cat, note, me.name, links[0], links[1], links[2], status, '', '', '', '', '', '', '', prId, ent]);
     if (pr) {
       var ps = sheet_('preq');
       ps.getRange(pr.row, 13).setValue('已採購');
       ps.getRange(pr.row, 17).setValue(id);
     }
-    log_(me.name, '財務' + type, money_(amount) + ' ' + cat + ' ' + note + '（' + status + '）' + (prId ? ' 請購 ' + prId : ''));
+    log_(me.name, '財務' + type, ent + ' ' + money_(amount) + ' ' + cat + ' ' + note + '（' + status + '）' + (prId ? ' 請購 ' + prId : ''));
     var t = money_(amount) + ' 元', over = pr && amount > pr.est ? '\n⚠️ 超過請購預估 ' + money_(pr.est) + ' 元' : '';
-    if (type === '撥入') cashNotify_('💰 零用金撥入 ' + t, me.name + (note ? '：' + note : ''), ['組長', '管理者']);
-    else if (type === '繳回') cashNotify_('↩️ 零用金繳回 ' + t, me.name + (note ? '：' + note : ''), ['組長', '財務', '管理者']);
+    if (type === '撥入') cashNotify_('💰 ' + ent + '零用金撥入 ' + t, me.name + (note ? '：' + note : ''), ['組長', '管理者']);
+    else if (type === '繳回') cashNotify_('↩️ ' + ent + '零用金繳回 ' + t, me.name + (note ? '：' + note : ''), ['組長', '財務', '管理者']);
     else if (type === '直付') cashNotify_('🏦 財務直付 ' + t, cat + '・' + note + over, ['管理者'].concat(pr ? ['組長'] : []), pr ? [pr.by] : []);
-    else cashNotify_('🧾 ' + me.name + ' ' + type + ' ' + t, cat + '・' + note + (links[0] ? '' : '（沒有收據照片）') + over, ['財務', '管理者']);
+    else cashNotify_('🧾 ' + me.name + ' ' + type + ' ' + t + '（' + ent + '）', cat + '・' + note + (links[0] ? '' : '（沒有收據照片）') + over, ['財務', '管理者']);
     return { id: id, status: status };
   }
 
@@ -1166,9 +1211,18 @@ function cashWrite_(b, me, caps, c, sh, now, stamp) {
     if (e.status !== '待核對') throw new Error('這筆已經是「' + e.status + '」');
     sh.getRange(e.row, 12).setValue('已核對');
     sh.getRange(e.row, 16, 1, 2).setValues([[me.name, stamp]]);
+    if (ENTITIES.indexOf(b.ent) >= 0 && b.ent !== e.ent) sh.getRange(e.row, 21).setValue(b.ent);
     if (note) sh.getRange(e.row, 19).setValue(note);
     log_(me.name, '核對帳目', e.by + ' ' + amt + ' ' + e.note);
     return { status: '已核對' };
+  }
+  if (op === 'ent') {
+    if (!caps.check) throw new Error('只有財務可以改主體');
+    if (ENTITIES.indexOf(b.ent) < 0) throw new Error('主體錯誤');
+    if (e.status === '作廢') throw new Error('作廢的紀錄不用改');
+    sh.getRange(e.row, 21).setValue(b.ent);
+    log_(me.name, '改主體', e.type + ' ' + amt + ' ' + e.note + '：' + (e.ent || '未指定') + ' → ' + b.ent);
+    return { status: e.status, ent: b.ent };
   }
   if (op === 'void') {
     var mine = e.by === me.name && ['待核准', '已核准', '待核對', '待還款', '已入帳', '已付款'].indexOf(e.status) >= 0;
