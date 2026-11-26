@@ -140,6 +140,11 @@
   #lname{letter-spacing:normal;font-size:20px}
   #pinBox{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9;display:flex;align-items:center;justify-content:center;padding:20px}
   #pinBox .card{width:100%;max-width:400px}
+  .chk{display:flex;align-items:center;gap:8px;font-weight:400;margin-bottom:14px}.chk input{width:auto;margin:0}
+  .clink{background:#f5f5f5;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:14px}.clink a{color:#c62828;margin-left:6px}
+  .rkhint{display:block;font-size:12px;opacity:.6;margin:-10px 0 14px}
+  .seg button{font-size:15px;padding:10px 4px}
+  .adnav button{font-size:13px;padding:12px 2px}
   .switch{float:right;margin-top:4px;background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:14px;padding:3px 10px;font:inherit;font-size:12px;font-weight:400}
 </style>
 </head>
@@ -185,7 +190,8 @@
     </section>
 
     <section id="report" class="hide">
-      <div class="seg"><button id="seg-work" class="on" onclick="seg('work')">事務回報</button><button id="seg-stay" onclick="seg('stay')">住廟回報</button><button id="seg-cash" onclick="seg('cash')">代墊</button></div>
+      <div class="seg"><button id="seg-work" class="on" onclick="seg('work')">事務回報</button><button id="seg-stay" onclick="seg('stay')">住廟回報</button><button id="seg-repair" onclick="seg('repair')">報修</button><button id="seg-cash" onclick="seg('cash')">財務</button></div>
+      <div id="rRepair" style="display:none"><div id="rRepairBody"></div></div>
       <div id="rCash" style="display:none"><div id="rCashBody"></div></div>
       <div class="card" id="rStay" style="display:none">
         <label>今天住廟人員<span class="sub" id="stayDate"></span></label>
@@ -196,6 +202,7 @@
       <div class="card" id="rWork">
         <label for="rKind">類型</label>
         <select id="rKind"><option>日報</option><option>異常回報</option><option>其他</option></select>
+        <small class="rkhint">設備、建物壞了請用上面的「報修」；異常回報用於人或安全狀況</small>
         <label for="rDate">日期</label>
         <input type="date" id="rDate">
         <label for="rText">內容</label>
@@ -213,7 +220,7 @@
     </section>
 
     <section id="lead" class="hide">
-      <div class="seg"><button id="lg-today" class="on" onclick="leadGo('today')">今日</button><button id="lg-sched" onclick="leadGo('sched')">排班</button><button id="lg-log" onclick="leadGo('log')">紀錄</button><button id="lg-cash" onclick="leadGo('cash')">零用金</button></div>
+      <div class="seg"><button id="lg-today" class="on" onclick="leadGo('today')">今日</button><button id="lg-sched" onclick="leadGo('sched')">排班</button><button id="lg-log" onclick="leadGo('log')">紀錄</button><button id="lg-repair" onclick="leadGo('repair')">報修</button><button id="lg-cash" onclick="leadGo('cash')">財務</button></div>
       <div class="msg" id="leadMsg"></div>
       <div id="leadBody"><div class="empty">載入中…</div></div>
     </section>
@@ -236,7 +243,8 @@
     <button id="at-sched" onclick="adTabGo('sched')">排班</button>
     <button id="at-log" onclick="adTabGo('log')">紀錄</button>
     <button id="at-news" onclick="adTabGo('news')">公告</button>
-    <button id="at-cash" onclick="adTabGo('cash')">零用金</button>
+    <button id="at-repair" onclick="adTabGo('repair')">報修</button>
+    <button id="at-cash" onclick="adTabGo('cash')">財務</button>
     <button id="at-settings" onclick="adTabGo('settings')">設定</button>
   </nav>
   <main><div class="msg" id="adMsg"></div><div id="adBody"><div class="empty">載入中…</div></div></main>
@@ -255,9 +263,10 @@
 <div id="lightbox" class="hide" onclick="closePhoto()"><img id="lbImg" alt=""><div id="lbMsg"></div></div>
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=15"></script>
-<script src="admin.js?v=10"></script>
-<script src="cash.js?v=1"></script>
+<script src="app.js?v=16"></script>
+<script src="admin.js?v=11"></script>
+<script src="cash.js?v=2"></script>
+<script src="repair.js?v=1"></script>
 <script src="push.js?v=3"></script>
 </body>
 </html>

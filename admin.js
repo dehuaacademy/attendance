@@ -6,18 +6,19 @@ var HOST = { body: 'adBody', msg: 'adMsg' };   // 管理者畫面；組長用「
 // 組長：在組員畫面的「管理」分頁：今日、排班、紀錄（含補登）、零用金
 function leadStart() {
   HOST = { body: 'leadBody', msg: 'leadMsg' };
-  leadGo(['sched', 'log', 'cash'].indexOf(adTab) >= 0 ? adTab : 'today', true);
+  leadGo(['sched', 'log', 'repair', 'cash'].indexOf(adTab) >= 0 ? adTab : 'today', true);
   adminLoad();
 }
 function leadGo(t, noRender) {
   adTab = t;
-  ['today', 'sched', 'log', 'cash'].forEach(function (x) { $('lg-' + x).classList.toggle('on', x === t); });
-  if (!noRender || t === 'cash') adRender();
+  ['today', 'sched', 'log', 'repair', 'cash'].forEach(function (x) { $('lg-' + x).classList.toggle('on', x === t); });
+  if (!noRender || t === 'cash' || t === 'repair') adRender();
   if (t === 'cash') cashLoad();
+  if (t === 'repair') repLoad();
 }
 
 // 管理者與唯讀角色（前賢、執行長、財務）共用這個畫面；唯讀角色只看得到排班、回報、公告、零用金，出勤資料都不能修改
-var VIEW_TABS = ['sched', 'log', 'news', 'cash'], AD_TABS = ['people', 'today', 'sched', 'log', 'news', 'cash', 'settings'];
+var VIEW_TABS = ['sched', 'log', 'news', 'repair', 'cash'], AD_TABS = ['people', 'today', 'sched', 'log', 'news', 'repair', 'cash', 'settings'];
 function adminStart(r) {
   busy = false;
   ROLE = r.role === 'viewer' ? 'viewer' : 'admin';
@@ -33,6 +34,7 @@ function adminStart(r) {
   $('adToday').textContent = r.today + '（' + WEEK[new Date(r.today + 'T00:00:00').getDay()] + '）';
   adminLoad();
   if (adTab === 'cash') cashLoad();
+  if (adTab === 'repair') repLoad();
   syncPush();
 }
 var adLast = '';
@@ -103,6 +105,7 @@ function adTabGo(t) {
   AD_TABS.forEach(function (x) { $('at-' + x).classList.toggle('on', x === t); });
   adRender();
   if (t === 'cash') cashLoad();
+  if (t === 'repair') repLoad();
 }
 function adDo(op, extra, okText) {
   if (isBusy()) return;
@@ -120,6 +123,7 @@ function dlabel(ds) { var d = new Date(ds + 'T00:00:00'); return (d.getMonth() +
 
 function adRender() {
   if (adTab === 'cash') { CASH_HOST = HOST.body; cashRender(); return; }
+  if (adTab === 'repair') { REP_HOST = HOST.body; repRender(); return; }
   if (!AD) return;
   var h = '';
   if (adTab === 'people') h = adPeople();
