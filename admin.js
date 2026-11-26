@@ -133,6 +133,7 @@ function adRender() {
   if (adTab === 'news') h = adNews();
   if (adTab === 'settings') h = adSettings();
   $(HOST.body).innerHTML = h;
+  if (adTab === 'today' && typeof chkLoad === 'function') { CHK_HOST = 'chkAdmin'; chkRender(); chkLoad('chkAdmin'); }
   loadThumbs();
 }
 
@@ -193,7 +194,7 @@ function adDevice(name) {
 // ---- 今日 ----
 function adToday() {
   var t = AD.today;
-  var h = '<div class="card"><h3 class="ah">簽到／簽退</h3>';
+  var h = '<div id="chkAdmin"></div><div class="card"><h3 class="ah">簽到／簽退</h3>';
   if (!AD.clock.length) h += '<div class="empty">今天還沒有人簽到</div>';
   AD.clock.forEach(function (c) {
     var tag = c.inRange === '是' ? '<span class="ok">範圍內</span>' : c.inRange === '否' ? '<span class="bad">範圍外 ' + esc(c.dist) + 'm</span>' : '<span class="mid">' + esc(c.inRange) + '</span>';
@@ -204,7 +205,7 @@ function adToday() {
   sch.forEach(function (s) { h += '<div class="lrow"><span>' + esc(s.name) + '</span><span>' + esc(s.start) + (s.end ? '–' + esc(s.end) : '') + ' ' + esc(s.note) + '</span></div>'; });
   var st = AD.stays.filter(function (s) { return s.date === t; });
   h += '</div><div class="card"><h3 class="ah">今天住廟（' + st.length + ' 位）</h3>' + (st.length ? '' : '<div class="empty">還沒有住廟回報</div>');
-  st.forEach(function (s) { h += '<div class="lrow"><span>' + esc(s.area) + '</span><span>' + esc(s.name) + '</span><small>' + esc(s.by) + ' 回報</small></div>'; });
+  st.forEach(function (s) { h += '<div class="lrow"><span>' + esc(s.area) + '</span><span>' + esc(s.name) + (s.duty ? '・' + esc(s.duty) : '') + '</span><small>' + esc(s.by) + ' 回報</small></div>'; });
   return h + '</div>';
 }
 
@@ -269,7 +270,7 @@ function adLog() {
   var cur = '';
   AD.stays.forEach(function (s) {
     if (s.date !== cur) { cur = s.date; h += '<div class="mon">' + dlabel(s.date) + '</div>'; }
-    h += '<div class="lrow"><span>' + esc(s.area) + '</span><span>' + esc(s.name) + '</span><small>' + esc(s.by) + '</small></div>';
+    h += '<div class="lrow"><span>' + esc(s.area) + '</span><span>' + esc(s.name) + (s.duty ? '・' + esc(s.duty) : '') + '</span><small>' + esc(s.by) + '</small></div>';
   });
   return h + '</div>';
 }

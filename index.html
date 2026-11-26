@@ -74,7 +74,8 @@
   .sub{font-weight:400;opacity:.6;margin-left:6px}
   .srow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
   .srow .n{width:20px;font-size:13px;opacity:.5;text-align:right;flex:none}
-  .srow select{width:38%;margin:0;padding:10px 6px}
+  .srow select{width:30%;margin:0;padding:10px 4px}
+  .srow select.sduty{width:24%}
   .srow input{flex:1;margin:0;padding:10px}
   #btnStay{margin-top:8px}
   #admin{flex:1}
@@ -145,6 +146,13 @@
   .rkhint{display:block;font-size:12px;opacity:.6;margin:-10px 0 14px}
   .seg button{font-size:15px;padding:10px 4px}
   .adnav button{font-size:13px;padding:12px 2px}
+  .chkn{float:right;font-size:14px;color:#b26a00}.chkn.ok{color:#2e7d32}
+  .chkho{background:#fff8e6;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:14px}.chkho div{margin-top:4px}.chkho small{opacity:.6;margin-right:4px}
+  .chks{border-top:1px solid #eee}.chkt{display:flex;gap:8px;align-items:center;padding:10px 2px;cursor:pointer}.chkt b{flex:1}.chkar{opacity:.5}
+  .chkl{display:flex;flex-wrap:wrap;gap:6px;padding-bottom:10px}
+  .chkb{border:1px solid #c9c9c9;background:#fff;color:var(--navy);border-radius:16px;padding:7px 12px;font:inherit;font-size:14px}
+  .chkb.on{background:#e8f5e9;border-color:#2e7d32;color:#2e7d32;font-weight:700}.chkb small{display:block;font-size:11px;font-weight:400;opacity:.7}
+  .chkx{width:100%}.chkx label{margin:4px 0}.chkx input{margin:0}.chkx .srow2{gap:6px}.chkx .sb{flex:none}
   .switch{float:right;margin-top:4px;background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:14px;padding:3px 10px;font:inherit;font-size:12px;font-weight:400}
 </style>
 </head>
@@ -187,6 +195,7 @@
       <button class="big in" id="btnIn" onclick="clock('簽到')">簽到</button>
       <button class="big out" id="btnOut" onclick="clock('簽退')">簽退</button>
       <div class="msg" id="mClock"></div>
+      <div id="chkStaff"></div>
     </section>
 
     <section id="report" class="hide">
@@ -263,8 +272,9 @@
 <div id="lightbox" class="hide" onclick="closePhoto()"><img id="lbImg" alt=""><div id="lbMsg"></div></div>
 <footer><img alt="德化" src="logo-mark.png"></footer>
 
-<script src="app.js?v=16"></script>
-<script src="admin.js?v=11"></script>
+<script src="app.js?v=17"></script>
+<script src="admin.js?v=12"></script>
+<script src="check.js?v=1"></script>
 <script src="cash.js?v=2"></script>
 <script src="repair.js?v=2"></script>
 <script src="push.js?v=3"></script>

@@ -2,7 +2,7 @@
 var API = 'https://script.google.com/macros/s/AKfycby8HebCpG-vkz4_Gg6Lb0mfeAdu_dNPyLTGxxbLVMhLtMZyiysfUqaTbkVVng9t_OkW/exec';
 var MAX_PHOTOS = 3, PHOTO_MAX_SIDE = 1600, PHOTO_QUALITY = 0.7;
 var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
-var AREAS = ['北一區', '北二區', '桃竹苗', '中區', '南區'], STAY_ROWS = 10;
+var AREAS = ['北一區', '北二區', '桃竹苗', '中區', '南區'], STAY_ROWS = 10, STAY_DUTIES = ['天廚', '志工', '輪值', '其他'];
 
 // ===== 身分：共用連結，第一次輸入個人 PIN 後記在這支手機上 =====
 function store(k, v) {
@@ -64,7 +64,7 @@ function logout(text) {
   lock(false); msg('mClock', '');
   store('dh_pin', null); store('dh_id', null); CODE = null; NAME = ''; myPinClose();
   $('who').textContent = ''; $('sIn').textContent = '—'; $('sOut').textContent = '—';
-  AD = null; CASH = null; cashArm = ''; cashPh = []; qPh = []; cashPr = ''; prRepair = null; REP = null; repPh = []; repArm = ''; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
+  AD = null; CASH = null; cashArm = ''; cashPh = []; qPh = []; cashPr = ''; prRepair = null; REP = null; repPh = []; repArm = ''; CHK = null; ROLE = 'staff'; $('tab-lead').classList.add('hide'); show('login'); msg('mLogin', text || '', text ? 'err' : '');
   if (!$('lname').value) $('lname').value = store('dh_lastname') || '';
   ($('lname').value ? $('pin') : $('lname')).focus();
 }
@@ -136,6 +136,7 @@ function applyStatus(r) {
     renderNews(r.news);
     if (!$('news').classList.contains('hide')) newsSeen();
     renderPushCards();
+    if (typeof chkLoad === 'function') { CHK_HOST = 'chkStaff'; chkRender(); chkLoad('chkStaff'); }
 }
 // 打開 App：有上次的資料就立刻畫出來
 function startCached() {
@@ -274,15 +275,16 @@ function buildStay(keep) {
   var html = '';
   for (var i = 0; i < STAY_ROWS; i++) {
     html += '<div class="srow"><span class="n">' + (i + 1) + '</span><select id="sa' + i + '">' + opts + '</select>'
-         + '<input id="sn' + i + '" placeholder="姓名" maxlength="30"></div>';
+         + '<input id="sn' + i + '" placeholder="姓名" maxlength="30">'
+         + '<select id="sd' + i + '" class="sduty"><option value="">事務</option>' + STAY_DUTIES.map(function (d) { return '<option>' + d + '</option>'; }).join('') + '</select></div>';
   }
   $('stayRows').innerHTML = html;
-  old.forEach(function (r, i) { if (i < STAY_ROWS) { $('sa' + i).value = r.area; $('sn' + i).value = r.name; } });
+  old.forEach(function (r, i) { if (i < STAY_ROWS) { $('sa' + i).value = r.area; $('sn' + i).value = r.name; $('sd' + i).value = r.duty || ''; } });
 }
 function stayValues(all) {
   var out = [];
   for (var i = 0; i < STAY_ROWS; i++) {
-    var r = { area: $('sa' + i).value, name: $('sn' + i).value.trim() };
+    var r = { area: $('sa' + i).value, name: $('sn' + i).value.trim(), duty: $('sd' + i).value };
     if (all || r.name || r.area) out.push(r);
   }
   return out;
@@ -335,6 +337,7 @@ function refresh(force) {
   var cashOn = typeof cashVisible === 'function' && cashVisible() && (force || canAutoRender());
   var repOn = typeof repVisible === 'function' && repVisible() && (force || canAutoRender());
   if (repOn) repLoad();
+  if (typeof CHK_HOST !== 'undefined' && CHK_HOST && $(CHK_HOST) && $(CHK_HOST).offsetParent !== null && (force || canAutoRender())) chkLoad();
   if (ROLE === 'admin' || ROLE === 'viewer') { if (force || canAutoRender()) adminLoad(); if (cashOn) cashLoad(); return; }
   load();
   if (AD && !$('lead').classList.contains('hide') && (force || canAutoRender())) adminLoad();
