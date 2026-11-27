@@ -30,6 +30,7 @@ function cashVisible() { return cashActive() && $(CASH_HOST).offsetParent !== nu
 function cashRender() {
   if (!cashActive()) return;
   $(CASH_HOST).innerHTML = cashHtml();
+  entLock();
   renderCashPh();
   if (typeof loadThumbs === 'function') loadThumbs();
 }
@@ -53,7 +54,18 @@ function prById(id) { return (CASH.preqs || []).filter(function (p) { return p.i
 function entOfCat(cat) { var m = CASH.entCats || {}; return (CASH.ents || []).filter(function (k) { return (m[k] || []).indexOf(cat) >= 0; })[0] || ''; }
 function entOpts(sel, blank) { return (blank ? '<option value="">' + blank + '</option>' : '') + (CASH.ents || []).map(function (k) { return '<option' + (k === sel ? ' selected' : '') + '>' + k + '</option>'; }).join(''); }
 // 選科目時自動帶主體（交通、雜支等沒有預設的要自己選）
-function entAuto(catId, entId) { if ($(entId)) $(entId).value = entOfCat($(catId).value); }
+function entAuto(catId, entId) { if ($(entId)) $(entId).value = entOfCat($(catId).value); entLock(); }
+// 有預設主體的科目：非財務鎖住主體（後台也會擋）
+function entLock() {
+  ['cx', 'pq'].forEach(function (x) {
+    var c = $(x + 'Cat'), e = $(x + 'Ent'); if (!c || !e) return;
+    var d = entOfCat(c.value);
+    if (d && !CASH.caps.check) { e.value = d; e.disabled = true; } else e.disabled = false;
+  });
+}
+// 主體和科目預設不同（財務改過）
+function entOff(x) { var d = entOfCat(x.cat); return !!(d && x.ent && x.ent !== d); }
+function entOffTag(x) { return entOff(x) ? '<span class="warn">⚠️ 主體與科目預設不同</span>' : ''; }
 function catOpts(sel) { return '<option value="">科目</option>' + CASH.cats.map(function (c) { return '<option' + (c === sel ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join(''); }
 
 function cashHtml() {
@@ -120,7 +132,7 @@ function preqItem(p, act) {
   var k = CASH.caps, me = CASH.me.name, id = p.id, h = '<div class="rep citem">';
   h += '<div><b>' + esc(p.item) + '</b> <span class="' + (CASH_TAG[p.status] || 'mid') + '">請購・' + esc(p.status) + '</span><span class="camt">' + nn(p.est) + '</span></div>'
      + '<small class="cmeta">' + esc(p.created.slice(5, 10).replace('-', '/')) + '・' + esc(p.by) + '・' + esc(p.ent || '未指定') + '・' + esc(p.cat) + '・報價 ' + p.quotes.length + ' 家'
-     + (p.apprBy ? '・' + (p.status === '退回' ? '退回' : '核准') + '：' + esc(p.apprBy) : '') + '</small>';
+     + (p.apprBy ? '・' + (p.status === '退回' ? '退回' : '核准') + '：' + esc(p.apprBy) : '') + '</small>' + entOffTag(p);
   if (p.note) h += '<p>' + esc(p.note) + '</p>';
   if (p.reason) h += '<p class="crem">單一報價理由：' + esc(p.reason) + '</p>';
   if (p.remark) h += '<p class="crem">備註：' + esc(p.remark) + '</p>';
@@ -165,7 +177,7 @@ function bookHtml() {
        + '<input type="file" id="cxPick" accept="image/*" multiple class="hide">'
        + '<div id="cxHint" class="chint"></div>'
        + '<button class="big send" id="cxBtn" onclick="cashAdd()">送出</button>'
-       + '<small>主體依科目自動帶（德化宮：' + esc((C.entCats['德化宮'] || []).join('、')) + '；其他科目多為基金會，交通、雜支請自己選）。付現金時從該主體的信封拿，收據放回同一個信封。'
+       + '<small>主體依科目自動帶（德化宮：' + esc((C.entCats['德化宮'] || []).join('、')) + '；其他科目多為基金會，交通、雜支請自己選；有預設的只有財務能改）。付現金時從該主體的信封拿，收據放回同一個信封。'
        + (cashType === '直付' ? '財務直付不扣組長的零用金，但會算進月報' : '超過 ' + nt(C.limit) + '（' + esc(C.exempt.join('、') || '無') + '除外）要先開請購單，核准後在上面選那張請購單') + '</small></div>';
   }
   if (k.fund) {
@@ -219,7 +231,7 @@ function cashItem(e, act) {
   h += '<div><b>' + esc(e.type === '撥入' || e.type === '繳回' ? e.type : e.cat) + '</b> <span class="' + (CASH_TAG[e.status] || 'mid') + '">' + esc(e.status) + '</span>'
      + '<span class="camt' + (e.type === '撥入' ? ' plus' : '') + '">' + sign + nn(e.amount) + '</span></div>'
      + '<small class="cmeta"><span class="cent">' + esc(e.ent || '未指定') + '</span>' + esc(e.date.slice(5).replace('-', '/')) + '・' + esc(e.by) + '・' + esc(TYPE_LABEL[e.type] || e.type)
-     + (e.checkBy ? '・核對：' + esc(e.checkBy) : '') + (e.repaidAt ? '・已還款' : '') + '</small>';
+     + (e.checkBy ? '・核對：' + esc(e.checkBy) : '') + (e.repaidAt ? '・已還款' : '') + '</small>' + entOffTag(e);
   if (e.note) h += '<p>' + esc(e.note) + '</p>';
   if (e.pr) h += '<small class="cmeta">📝 請購 ' + (pr ? esc(pr.item) + '（預估 ' + nn(pr.est) + (e.amount > pr.est ? '，⚠️ 超過' : '') + '）' : esc(e.pr)) + '</small>';
   if (e.remark) h += '<p class="crem">備註：' + esc(e.remark) + '</p>';

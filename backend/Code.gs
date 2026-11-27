@@ -23,7 +23,7 @@
  * 每天早上自動檢查未來 7 天，有哪天沒人排班就推播提醒（觸發器由 setup() 建立）。
  */
 
-var VERSION = '6.6';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
+var VERSION = '6.7';          // 每次更新遞增；更新器用 ?action=ping 確認新版已上線
 
 var CONFIG = {
   TEMPLE_LAT: 23.783748,      // 發一靈隱德化宮
@@ -1042,11 +1042,17 @@ function push_(b) {
 // （v5.9 舊流程的「待核准／已核准」帳本列仍照舊計算，新版不再產生）
 var CASH_COLS = 21;
 // v6.5 起零用金分「德化宮」「基金會」兩個主體，各自有固定額度；現金＋待補憑證＝額度
-// 主體預設依科目帶（設定「德化宮科目」「基金會科目」），交通、雜支等要自己選；財務核對時可以改
+// 主體預設依科目帶（設定「德化宮科目」「基金會科目」），交通、雜支等要自己選；有預設的只有財務能改（v6.7）
 var ENTITIES = ['德化宮', '基金會'];
 function entOfCat_(cat) {
   var m = cfg_().entCats;
   return ENTITIES.filter(function (k) { return m[k].indexOf(cat) >= 0; })[0] || '';
+}
+// v6.7：有預設主體的科目，只有財務（核對權限）可以改成另一個主體；交通、雜支等沒有預設的照選的
+function entPick_(want, cat, caps) {
+  var def = entOfCat_(cat);
+  if (def && !caps.check) return def;
+  return ENTITIES.indexOf(want) >= 0 ? want : def;
 }
 var CASH_SPENT = { '支出': ['已核准', '待核對', '已核對'], '代墊': ['待核對', '已核對'] };
 function cashCaps_(role) {
@@ -1192,7 +1198,7 @@ function preqWrite_(b, me, caps, c, stamp) {
     if (!item) throw new Error('請填品項（要買什麼、修什麼）');
     if (!(est > 0 && est <= 10000000)) throw new Error('請填預估金額');
     if (c.cashCats.indexOf(cat) < 0) throw new Error('請選擇科目');
-    var ent = ENTITIES.indexOf(b.ent) >= 0 ? b.ent : entOfCat_(cat);
+    var ent = entPick_(b.ent, cat, caps);
     if (!ent) throw new Error('請選擇主體（德化宮或基金會）');
     var quotes = Array.isArray(b.quotes) ? b.quotes : [], reason = String(b.reason || '').trim().slice(0, 200);
     if (quotes.length < 2 && !reason) throw new Error('請附至少 2 家報價；只有 1 家或沒有報價，請填原因');
@@ -1265,7 +1271,7 @@ function cashWrite_(b, me, caps, c, sh, now, stamp) {
       } else if (type !== '直付' && cashBig_(amount, cat)) {
         throw new Error('超過 ' + money_(c.cashLimit) + ' 元要先開請購單，執行長核准後，記帳時選那張請購單');
       }
-      if (!ent) ent = (pr && pr.ent) || entOfCat_(cat);
+      ent = pr && !caps.check ? (pr.ent || entPick_('', cat, caps)) : entPick_(ent || (pr && pr.ent) || '', cat, caps);
       if (!ent) throw new Error('「' + cat + '」要選主體：德化宮或基金會');
       status = type === '支出' ? '待核對' : type === '代墊' ? '待還款' : '已付款';
     } else throw new Error('類型錯誤');
@@ -1303,7 +1309,10 @@ function cashWrite_(b, me, caps, c, sh, now, stamp) {
     if (e.status !== '待核對') throw new Error('這筆已經是「' + e.status + '」');
     sh.getRange(e.row, 12).setValue('已核對');
     sh.getRange(e.row, 16, 1, 2).setValues([[me.name, stamp]]);
-    if (ENTITIES.indexOf(b.ent) >= 0 && b.ent !== e.ent) sh.getRange(e.row, 21).setValue(b.ent);
+    if (ENTITIES.indexOf(b.ent) >= 0 && b.ent !== e.ent) {
+      sh.getRange(e.row, 21).setValue(b.ent);
+      log_(me.name, '改主體', e.type + ' ' + amt + ' ' + e.note + '：' + (e.ent || '未指定') + ' → ' + b.ent + '（核對時）');
+    }
     if (note) sh.getRange(e.row, 19).setValue(note);
     log_(me.name, '核對帳目', e.by + ' ' + amt + ' ' + e.note);
     return { status: '已核對' };
